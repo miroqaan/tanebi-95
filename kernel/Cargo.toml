@@ -1,0 +1,23 @@
+[package]
+name = "tanebi95-kernel"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "tanebi95-kernel"
+path = "src/main.rs"
+
+[features]
+qemu-test-exit = []
+
+[dependencies]
+uefi = { version = "0.40.0", features = ["panic_handler"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true
