@@ -25,7 +25,7 @@ typedef void(*FrameRenderFptr)(void);
 ////////////////////////////////////////////////////////////////////
 
 static EFI_GRAPHICS_OUTPUT_PROTOCOL* gGOP = NULL;
-static EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE* mode = NULL;
+static UINT32 originalMode;
 
 static UINT32 frameLeft = 0;
 static UINT32 frameTop = 0;
@@ -40,7 +40,7 @@ static FrameRenderFptr gRenderFunc = NULL;
 static boolean getInput = true;
 static EFI_KEY_DATA keydata[4096];
 static unsigned int keycounter;
-#define FRAME_SCALE 2
+static UINT32 frameScale = 1;
 
 static int xlatekey(EFI_INPUT_KEY* efiKey);
 
@@ -261,16 +261,27 @@ void I_InitGraphics (void)
 			gInputEx->RegisterKeyNotify(gInputEx,&scankeydata,I_ScanKeyNotify,(void**)&ScanNotifHandle);
 		}
 	}*/
-	mode = gGOP->Mode;
-	status = gGOP->SetMode(gGOP, 0);
-	if (EFI_ERROR(status))
+	originalMode = gGOP->Mode->Mode;
+	// Match the desktop: 320x200 becomes a crisp, full-screen 1280x800.
+	// If unavailable, fit the current GOP mode instead of forcing mode 0.
+	for (UINT32 index = 0; index < gGOP->Mode->MaxMode; ++index)
 	{
-		printf("GOP mode not set; using native console mode\n");
+		EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* info = NULL;
+		UINTN size = 0;
+		status = gGOP->QueryMode(gGOP, index, &size, &info);
+		if (EFI_ERROR(status)) continue;
+		boolean preferred = info->HorizontalResolution == 1280 && info->VerticalResolution == 800;
+		gBS->FreePool(info);
+		if (preferred && !EFI_ERROR(gGOP->SetMode(gGOP, index))) break;
 	}
+	frameScale = gGOP->Mode->Info->HorizontalResolution / SCREENWIDTH;
+	if (frameScale > gGOP->Mode->Info->VerticalResolution / SCREENHEIGHT)
+		frameScale = gGOP->Mode->Info->VerticalResolution / SCREENHEIGHT;
+	if (frameScale == 0) I_Error("Display too small for DOOM");
 	
 	// Calculate frame origin in current display mode
-	frameWidth = SCREENWIDTH * FRAME_SCALE;
-	frameHeight = SCREENHEIGHT * FRAME_SCALE;
+	frameWidth = SCREENWIDTH * frameScale;
+	frameHeight = SCREENHEIGHT * frameScale;
 	frameLeft = (gGOP->Mode->Info->HorizontalResolution - frameWidth) >> 1;
 	frameTop = (gGOP->Mode->Info->VerticalResolution - frameHeight) >> 1;
 
@@ -316,12 +327,12 @@ void MakeFrame (void)
 		{
 			byte pixel = *srcLine++;
 
-			for (linedest = 0; linedest < FRAME_SCALE; linedest++)
+			for (linedest = 0; linedest < frameScale; linedest++)
 			{
 			*dstLine++ = gPalette[pixel];
 			}
 		}
-		for (linedest = 0; linedest < (FRAME_SCALE - 1); linedest++)
+		for (linedest = 0; linedest < (frameScale - 1); linedest++)
 		{
 			// Copy this dst line to the next one
 			memcpy(dstLine, curLine, frameWidth * sizeof(*frameBuffer));
@@ -340,7 +351,7 @@ void I_FinishUpdate (void)
 
 void I_ShutdownGraphics(void)
 {
-	gGOP->SetMode(gGOP,mode->Mode);
+	gGOP->SetMode(gGOP,originalMode);
 	free(frameBuffer);
 	free(screens[0]);
 

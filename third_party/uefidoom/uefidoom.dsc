@@ -70,6 +70,6 @@
 
   CacheMaintenanceLib|MdePkg/Library/BaseCacheMaintenanceLib/BaseCacheMaintenanceLib.inf
 [Components]
-uefidoom-reference/uefidoom/doom.inf
+tanebi-95/third_party/uefidoom/source/doom.inf
 
 !include StdLib/StdLib.inc
