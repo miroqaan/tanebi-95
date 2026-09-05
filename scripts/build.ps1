@@ -9,10 +9,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $kernelManifest = Join-Path $repositoryRoot 'kernel\Cargo.toml'
+$bootManagerManifest = Join-Path $repositoryRoot 'bootmgr\Cargo.toml'
 $buildRoot = Join-Path $repositoryRoot 'build'
 $manifestOutput = Join-Path $buildRoot 'system.manifest'
 $efiBootRoot = Join-Path $buildRoot 'esp\EFI\BOOT'
 $imageOutput = Join-Path $buildRoot 'tanebi95.img'
+$doomEfi = Join-Path $repositoryRoot 'third_party\uefidoom\prebuilt\doom.efi'
+$shellEfi = Join-Path $repositoryRoot 'third_party\edk2-shell\Shell.efi'
+$doomWad = Join-Path $repositoryRoot 'assets\freedoom2.wad'
+$startupScript = Join-Path $repositoryRoot 'assets\startup.nsh'
 
 function Resolve-Tool([string]$Name, [string[]]$Candidates) {
     $command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -55,19 +60,31 @@ if ($QemuTest) { $cargoArgs += @('--features', 'qemu-test-exit') }
 & $cargo @cargoArgs
 if ($LASTEXITCODE -ne 0) { throw 'TANEBI 95 kernel build failed.' }
 
+Write-Host 'Building the TANEBI 95 UEFI boot manager...'
+$bootManagerArgs = @('build', '--manifest-path', $bootManagerManifest, '--target', 'x86_64-unknown-uefi')
+if ($Profile -eq 'release') { $bootManagerArgs += '--release' }
+& $cargo @bootManagerArgs
+if ($LASTEXITCODE -ne 0) { throw 'TANEBI 95 boot manager build failed.' }
+
 $kernelEfi = Join-Path $repositoryRoot "kernel\target\x86_64-unknown-uefi\$Profile\tanebi95-kernel.efi"
+$bootManagerEfi = Join-Path $repositoryRoot "bootmgr\target\x86_64-unknown-uefi\$Profile\tanebi95-bootmgr.efi"
 $bootEfi = Join-Path $efiBootRoot 'BOOTX64.EFI'
-Copy-Item -LiteralPath $kernelEfi -Destination $bootEfi -Force
+Copy-Item -LiteralPath $bootManagerEfi -Destination $bootEfi -Force
+
+if (-not (Test-Path -LiteralPath $doomEfi)) { throw "Native DOOM payload not found: $doomEfi" }
+if (-not (Test-Path -LiteralPath $shellEfi)) { throw "EDK II Shell payload not found: $shellEfi" }
+if (-not (Test-Path -LiteralPath $doomWad)) { throw "Freedoom IWAD not found: $doomWad" }
 
 Write-Host 'Creating bootable FAT16 disk image...'
 Push-Location $repositoryRoot
 try {
-    & $go run ./tools/mkfat16 $bootEfi $imageOutput
+    & $go run ./tools/mkfat16 $bootEfi $kernelEfi $shellEfi $doomEfi $doomWad $startupScript $imageOutput
     if ($LASTEXITCODE -ne 0) { throw 'FAT16 image creation failed.' }
 }
 finally {
     Pop-Location
 }
 
-Write-Host "UEFI loader: $bootEfi"
+Write-Host "UEFI boot manager: $bootEfi"
+Write-Host "Native DOOM: $doomEfi"
 Write-Host "Boot image: $imageOutput"

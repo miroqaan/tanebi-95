@@ -1,5 +1,6 @@
 /build/
 /kernel/target/
+/bootmgr/target/
 *.pdb
 .idea/
 *.iml

@@ -1,0 +1,17 @@
+[package]
+name = "tanebi95-bootmgr"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "tanebi95-bootmgr"
+path = "src/main.rs"
+
+[dependencies]
+uefi = { version = "0.40.0", features = ["panic_handler"] }
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true

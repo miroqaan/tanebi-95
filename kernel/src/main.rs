@@ -222,6 +222,12 @@ fn draw_folder(frame: &mut FrameBuffer, x: usize, y: usize) {
     frame.bevel(x, y + 12, 40, 26, true);
 }
 
+fn draw_doom_icon(frame: &mut FrameBuffer, x: usize, y: usize) {
+    frame.fill_rect(x, y + 4, 42, 34, BLACK);
+    frame.bevel(x, y + 4, 42, 34, true);
+    draw_flame(frame, x + 12, y + 7, 3);
+}
+
 fn draw_desktop_icon(frame: &mut FrameBuffer, x: usize, y: usize, label: &str, folder: bool) {
     if folder {
         draw_folder(frame, x + 10, y);
@@ -343,9 +349,9 @@ fn draw_start_menu(frame: &mut FrameBuffer) {
     let mut item_y = y + 18;
     for item in [
         "TANEBI STUDIO",
+        "DOOM ARENA",
         "MY COMPUTER",
         "DOCUMENTS",
-        "REBOOT",
         "SHUT DOWN",
     ] {
         if item == "TANEBI STUDIO" {
@@ -403,18 +409,18 @@ fn toggle_mouse_cursor(frame: &mut FrameBuffer, mouse: &MouseState) {
     }
 }
 
-fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y: usize) {
+fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y: usize) -> bool {
     let taskbar_y = frame.height.saturating_sub(42);
 
     if x <= 112 && y >= taskbar_y {
         state.start_open = !state.start_open;
         state.power_open = false;
-        return;
+        return false;
     }
 
     if state.power_open {
         state.power_open = false;
-        return;
+        return false;
     }
 
     if state.start_open {
@@ -424,18 +430,23 @@ fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y
             let row = y.saturating_sub(menu_y + 5) / 40;
             match row {
                 0 => state.studio_open = true,
+                1 => return true,
                 4 => state.power_open = true,
                 _ => {}
             }
             state.start_open = false;
-            return;
+            return false;
         }
         state.start_open = false;
     }
 
     if x <= 120 && (105..=198).contains(&y) {
         state.studio_open = true;
-        return;
+        return false;
+    }
+
+    if x <= 120 && (279..=370).contains(&y) {
+        return true;
     }
 
     if state.studio_open {
@@ -455,6 +466,7 @@ fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y
             state.studio_open = false;
         }
     }
+    false
 }
 
 fn mouse_write(value: u8) {
@@ -525,7 +537,9 @@ fn render(frame: &mut FrameBuffer, state: DesktopState) {
         manifest_value("DOCUMENTS", "DOCUMENTS"),
         true,
     );
-    draw_desktop_icon(frame, 28, 289, "RECYCLE BIN", false);
+    draw_doom_icon(frame, 38, 289);
+    frame.text(28, 334, "DOOM ARENA", WHITE, 1);
+    draw_desktop_icon(frame, 28, 376, "RECYCLE BIN", false);
     draw_window(frame, state);
 
     let taskbar_y = frame.height.saturating_sub(42);
@@ -562,7 +576,7 @@ fn render(frame: &mut FrameBuffer, state: DesktopState) {
     frame.text(
         26,
         taskbar_y.saturating_sub(22),
-        "MOUSE: CLICK   S: START   T: STUDIO   ESC: POWER",
+        "MOUSE: CLICK   D: DOOM   S: START   T: STUDIO   ESC: POWER",
         WHITE,
         1,
     );
@@ -666,7 +680,10 @@ fn main() -> Status {
                     }
                     if clicked {
                         toggle_mouse_cursor(&mut frame, &mouse);
-                        handle_mouse_click(&frame, &mut state, mouse.x, mouse.y);
+                        let launch_doom = handle_mouse_click(&frame, &mut state, mouse.x, mouse.y);
+                        if launch_doom {
+                            request_doom_reboot();
+                        }
                         render(&mut frame, state);
                         toggle_mouse_cursor(&mut frame, &mouse);
                     }
@@ -688,6 +705,7 @@ fn main() -> Status {
                     state.start_open = false;
                     state.power_open = false;
                 }
+                0x20 => request_doom_reboot(),
                 0x01 => {
                     state.power_open = !state.power_open;
                     state.start_open = false;
@@ -724,6 +742,19 @@ fn serial_write(text: &str) {
             }
             outb(0x3f8, byte);
         }
+    }
+}
+
+fn request_doom_reboot() -> ! {
+    serial_write("TANEBI95_DOOM_REQUESTED\n");
+    unsafe {
+        outb(0x70, 0x38 | 0x80);
+        outb(0x71, 0xd5);
+    }
+    wait_controller_write();
+    unsafe { outb(0x64, 0xfe) };
+    loop {
+        spin_loop();
     }
 }
 

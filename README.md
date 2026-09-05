@@ -8,12 +8,13 @@
 
 ## 특징
 
-- 32MiB FAT16 x86-64 UEFI 부팅 이미지
+- 64MiB FAT16 x86-64 UEFI 부팅 이미지
 - `ExitBootServices` 이후 bare-metal 실행
 - GOP 프레임버퍼 직접 렌더링
 - PS/2 I/O 포트 기반 키보드·마우스 입력과 소프트웨어 커서
 - TANEBI 스크립트로 생성하는 결정론적 부팅 매니페스트
 - TANEBI Studio, 시작 메뉴, 전원 화면
+- DOOM ARENA: 재부팅을 통해 UEFI DOOM과 Freedoom Phase 2 실행
 
 ## 빌드
 
@@ -24,7 +25,7 @@
 산출물:
 
 - `build/esp/EFI/BOOT/BOOTX64.EFI`
-- `build/tanebi95.img` — 32MiB FAT16 UEFI 부팅 이미지
+- `build/tanebi95.img` — 64MiB FAT16 UEFI 부팅 이미지
 
 ## 실행
 
@@ -39,6 +40,10 @@ QEMU와 x86-64 EDK2 펌웨어가 필요하다.
 - `S`: 시작 메뉴
 - `T`: TANEBI Studio 창 열기/닫기
 - `Esc`: 전원 화면
+- `D`: DOOM ARENA로 재부팅
+
+DOOM에서는 방향키로 이동·회전, `Space`로 사격, `E`로 문을 연다.
+게임 오디오는 현재 비활성화돼 있다.
 
 마우스:
 
@@ -47,6 +52,10 @@ QEMU와 x86-64 EDK2 펌웨어가 필요하다.
 - Studio 창의 닫기 버튼 클릭
 
 ## 현재 경계
+
+DOOM은 커널 내부 프로세스가 아니다. 데스크톱이 CMOS 부팅 선택 값을 기록하고 재부팅하면 부트 매니저가 EDK II Shell과 UEFI DOOM을 실행한다. 데스크톱과 게임 모두 QEMU 가상 머신 안에서 실행된다. 게임을 종료한 뒤 QEMU를 재시작하면 데스크톱으로 돌아온다.
+
+네이티브 버전의 Studio는 빌드 시 생성된 TANEBI 결과를 표시한다. 웹판의 YouTube 플레이어, 네트워크, 동영상 디코더, 오디오 드라이버는 아직 네이티브 커널에 이식하지 않았다. 소개영상은 이 경계를 명시한다.
 
 이 버전은 실제로 UEFI에서 부팅한 뒤 펌웨어 부팅 서비스를 종료하는 bare-metal Stage 1이다. 이후 화면은 프레임버퍼 메모리에 직접 쓰고 키보드는 PS/2 I/O 포트에서 scan code를 읽는다.
 

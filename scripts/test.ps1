@@ -13,7 +13,7 @@ $manifest = Join-Path $buildRoot 'system.manifest'
 
 if ((Get-Item -LiteralPath $efi).Length -lt 4096) { throw 'UEFI executable is unexpectedly small.' }
 $imageBytes = [System.IO.File]::ReadAllBytes($image)
-if ($imageBytes.Length -ne 33554432) { throw "Unexpected image size: $($imageBytes.Length)" }
+if ($imageBytes.Length -ne 67108864) { throw "Unexpected image size: $($imageBytes.Length)" }
 if ($imageBytes[510] -ne 0x55 -or $imageBytes[511] -ne 0xAA) { throw 'FAT boot signature is missing.' }
 if (-not ((Get-Content -Raw -LiteralPath $manifest) -match 'STATUS=TANEBI BOOT SCRIPT OK')) {
     throw 'TANEBI boot manifest was not generated.'

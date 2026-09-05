@@ -39,9 +39,10 @@ $arguments = @(
     '-m', '256M',
     '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
     '-drive', "format=raw,file=$image",
-    '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-    '-no-reboot'
+    '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04'
 )
+
+if ($HeadlessTest) { $arguments += '-no-reboot' }
 
 if ($HeadlessTest -or -not $SerialLog) {
     $arguments += @('-serial', 'stdio')

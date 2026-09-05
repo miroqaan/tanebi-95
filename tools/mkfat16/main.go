@@ -8,42 +8,67 @@ import (
 
 const (
 	sectorSize        = 512
-	sectorsPerImage   = 65536
+	sectorsPerImage   = 131072
 	sectorsPerCluster = 4
 	reservedSectors   = 1
 	fatCount          = 2
-	sectorsPerFAT     = 64
+	sectorsPerFAT     = 128
 	rootEntries       = 512
 	rootSectors       = rootEntries * 32 / sectorSize
 	dataStartSector   = reservedSectors + fatCount*sectorsPerFAT + rootSectors
 	imageSize         = sectorSize * sectorsPerImage
 )
 
+type imageFile struct {
+	name    string
+	data    []byte
+	cluster uint16
+}
+
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: mkfat16 <BOOTX64.EFI> <image.img>")
+	if len(os.Args) != 8 {
+		fmt.Fprintln(os.Stderr, "usage: mkfat16 <BOOTX64.EFI> <KERNEL.EFI> <SHELL.EFI> <DOOM.EFI> <DOOM2.WAD> <STARTUP.NSH> <image.img>")
 		os.Exit(2)
 	}
-	payload, err := os.ReadFile(os.Args[1])
+	files := []imageFile{
+		{name: "BOOTX64 EFI", data: mustRead(os.Args[1])},
+		{name: "KERNEL  EFI", data: mustRead(os.Args[2])},
+		{name: "SHELL   EFI", data: mustRead(os.Args[3])},
+		{name: "DOOM    EFI", data: mustRead(os.Args[4])},
+		{name: "DOOM2   WAD", data: mustRead(os.Args[5])},
+		{name: "STARTUP NSH", data: mustRead(os.Args[6])},
+	}
+	image, err := makeImage(files)
 	if err != nil {
 		fatal(err)
 	}
-	image, err := makeImage(payload)
-	if err != nil {
-		fatal(err)
-	}
-	if err := os.WriteFile(os.Args[2], image, 0o644); err != nil {
+	if err := os.WriteFile(os.Args[7], image, 0o644); err != nil {
 		fatal(err)
 	}
 }
 
-func makeImage(payload []byte) ([]byte, error) {
+func mustRead(path string) []byte {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fatal(err)
+	}
+	return data
+}
+
+func makeImage(files []imageFile) ([]byte, error) {
 	clusterBytes := sectorSize * sectorsPerCluster
-	fileClusters := (len(payload) + clusterBytes - 1) / clusterBytes
-	lastCluster := 3 + fileClusters
+	nextCluster := 4
+	for index := range files {
+		files[index].cluster = uint16(nextCluster)
+		clusters := (len(files[index].data) + clusterBytes - 1) / clusterBytes
+		if clusters == 0 {
+			clusters = 1
+		}
+		nextCluster += clusters
+	}
 	maxClusters := (sectorsPerImage - dataStartSector) / sectorsPerCluster
-	if lastCluster >= maxClusters {
-		return nil, fmt.Errorf("EFI payload is too large for image")
+	if nextCluster >= maxClusters+2 {
+		return nil, fmt.Errorf("TANEBI payloads are too large for the FAT16 image")
 	}
 
 	image := make([]byte, imageSize)
@@ -51,12 +76,20 @@ func makeImage(payload []byte) ([]byte, error) {
 	fat := make([]uint16, sectorsPerFAT*sectorSize/2)
 	fat[0], fat[1] = 0xfff8, 0xffff
 	fat[2], fat[3] = 0xffff, 0xffff
-	for cluster := 4; cluster <= lastCluster; cluster++ {
-		if cluster == lastCluster {
-			fat[cluster] = 0xffff
-		} else {
-			fat[cluster] = uint16(cluster + 1)
+	for _, file := range files {
+		clusters := (len(file.data) + clusterBytes - 1) / clusterBytes
+		if clusters == 0 {
+			clusters = 1
 		}
+		for offset := 0; offset < clusters; offset++ {
+			cluster := int(file.cluster) + offset
+			if offset == clusters-1 {
+				fat[cluster] = 0xffff
+			} else {
+				fat[cluster] = uint16(cluster + 1)
+			}
+		}
+		copy(image[clusterOffset(int(file.cluster)):], file.data)
 	}
 	for copyIndex := 0; copyIndex < fatCount; copyIndex++ {
 		offset := (reservedSectors + copyIndex*sectorsPerFAT) * sectorSize
@@ -68,9 +101,11 @@ func makeImage(payload []byte) ([]byte, error) {
 	rootOffset := (reservedSectors + fatCount*sectorsPerFAT) * sectorSize
 	writeEntry(image[rootOffset:], "TANEBI 95  ", 0x08, 0, 0)
 	writeEntry(image[rootOffset+32:], "EFI        ", 0x10, 2, 0)
-	writeDirectory(image, 2, 0, "BOOT       ", 3)
-	writeDirectory(image, 3, 2, "BOOTX64 EFI", 4)
-	copy(image[clusterOffset(4):], payload)
+	for index, file := range files[1:] {
+		writeEntry(image[rootOffset+(index+2)*32:], file.name, 0x20, file.cluster, uint32(len(file.data)))
+	}
+	writeDirectory(image, 2, 0, "BOOT       ", 3, 0)
+	writeDirectory(image, 3, 2, files[0].name, files[0].cluster, uint32(len(files[0].data)))
 	return image, nil
 }
 
@@ -90,32 +125,21 @@ func writeBootSector(image []byte) {
 	binary.LittleEndian.PutUint32(image[28:], 0)
 	binary.LittleEndian.PutUint32(image[32:], sectorsPerImage)
 	image[36], image[38] = 0x80, 0x29
-	binary.LittleEndian.PutUint32(image[39:], 0x95090401)
+	binary.LittleEndian.PutUint32(image[39:], 0x95090402)
 	copy(image[43:54], []byte("TANEBI 95  "))
 	copy(image[54:62], []byte("FAT16   "))
 	image[510], image[511] = 0x55, 0xaa
 }
 
-func writeDirectory(image []byte, cluster, parent uint16, childName string, childCluster uint16) {
+func writeDirectory(image []byte, cluster, parent uint16, childName string, childCluster uint16, childSize uint32) {
 	offset := clusterOffset(int(cluster))
 	writeEntry(image[offset:], ".          ", 0x10, cluster, 0)
 	writeEntry(image[offset+32:], "..         ", 0x10, parent, 0)
 	attribute := byte(0x10)
-	size := uint32(0)
-	if childName == "BOOTX64 EFI" {
+	if childSize > 0 {
 		attribute = 0x20
-		childCluster = 4
-		size = uint32(lenFromData(image))
 	}
-	writeEntry(image[offset+64:], childName, attribute, childCluster, size)
-}
-
-func lenFromData(_ []byte) int {
-	info, err := os.Stat(os.Args[1])
-	if err != nil {
-		fatal(err)
-	}
-	return int(info.Size())
+	writeEntry(image[offset+64:], childName, attribute, childCluster, childSize)
 }
 
 func writeEntry(target []byte, name string, attribute byte, cluster uint16, size uint32) {
