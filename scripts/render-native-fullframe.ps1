@@ -1,7 +1,8 @@
-param([switch]$CleanInput)
+param([switch]$CleanInput,[switch]$Media)
+if($Media){$CleanInput=$true}
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$out = Join-Path $root $(if($CleanInput){'build\native-clean'}else{'build\native-fullframe'})
+$out = Join-Path $root $(if($Media){'build\native-player-intro'}elseif($CleanInput){'build\native-clean'}else{'build\native-fullframe'})
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item C:\Windows\Fonts\YuGothR.ttc (Join-Path $out 'font.ttc') -Force
 # Match the web introduction's full-bleed footage and brief orange chapter cards.
@@ -21,13 +22,24 @@ if($CleanInput) {
         @{File='qemu-combat-take.mp4';Start=8;Duration=30;Crop='crop=640:400:320:200,';Title='03  DOOM — 実際の戦闘';Text='続いて、UEFI版ドゥームの実際の戦闘です。方向キーで移動と旋回、スペースで射撃、イーキーで扉を開きます。敵の攻撃に反撃しながら、体力と弾薬の変化にも注目してください。収録時のゲーム音声はミュートしています。'}
     )
 }
+if($Media){
+    $mediaScene=@{File='player-capture\desktop.mp4';Start=0;Duration=36;Crop='';Title='03  ネイティブ・メディアプレイヤー';Text='メディアプレイヤーを開き、再生をクリックします。指定された動画の16分14秒から、30秒の区間をOSに内蔵しました。これはウェブページではなく、ネイティブの動画再生です。音声出力にも対応しています。一時停止して5秒先へ移動し、再生を再開。シークバーで好きな位置へ移り、停止すると先頭へ戻ります。最後にウィンドウを閉じます。現在はオフライン再生で、YouTubeへの直接接続ではありません。';Clicks=@(@{T=1.7;X=60;Y=480},@{T=3.7;X=190;Y=681},@{T=6.2;X=600;Y=681},@{T=12.2;X=190;Y=681},@{T=14.7;X=495;Y=681},@{T=17.2;X=190;Y=681},@{T=26.2;X=900;Y=681},@{T=31.2;X=290;Y=681},@{T=33.7;X=1123;Y=68})}
+    $audioScene=@{File='player-capture\desktop.mp4';Start=6.3;Duration=4;Crop='';Title='04  ネイティブ音声 — 実出力';AudioFile='player-capture\audio.wav'}
+    $scenes[2].Title='05  DOOM — 実際の戦闘'
+    $scenes=@($scenes[0],$scenes[1],$mediaScene,$audioScene,$scenes[2])
+}
 for ($i=0; $i -lt $scenes.Count; $i++) {
     $scene=$scenes[$i]; $n=$i+1
     $audio=Join-Path $out "$n.mp3"
-    & py -3.14 -m edge_tts --voice ja-JP-NanamiNeural --text $scene.Text --write-media $audio
-    if ($LASTEXITCODE -ne 0) { throw 'Japanese narration failed' }
-    $audioDuration=[double](& ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 $audio)
-    $duration=[math]::Max($scene.Duration,$audioDuration+0.4)
+    if($scene.AudioFile){
+        $audio=Join-Path $root ('build\'+$scene.AudioFile)
+        $duration=$scene.Duration
+    }else{
+        & py -3.14 -m edge_tts --voice ja-JP-NanamiNeural --text $scene.Text --write-media $audio
+        if ($LASTEXITCODE -ne 0) { throw 'Japanese narration failed' }
+        $audioDuration=[double](& ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 $audio)
+        $duration=[math]::Max($scene.Duration,$audioDuration+0.4)
+    }
     [IO.File]::WriteAllText((Join-Path $out "$n.txt"),$scene.Title,[Text.UTF8Encoding]::new($false))
     $inputFile=Join-Path $root ('build\'+$scene.File)
     # Two-times integer scale for desktop text; four-times for original combat.
@@ -53,7 +65,7 @@ for ($i=0; $i -lt $scenes.Count; $i++) {
 }
 $concat=Join-Path $out 'concat.txt'
 [IO.File]::WriteAllLines($concat,(1..$scenes.Count | ForEach-Object {"file '$_.mp4'"}))
-$output=Join-Path $root $(if($CleanInput){'build\TANEBI-95-native-ja-clean-clicks-1600p.mp4'}else{'build\TANEBI-95-native-ja-fullframe-1600p.mp4'})
+$output=Join-Path $root $(if($Media){'build\TANEBI-95-native-ja-player-1600p.mp4'}elseif($CleanInput){'build\TANEBI-95-native-ja-clean-clicks-1600p.mp4'}else{'build\TANEBI-95-native-ja-fullframe-1600p.mp4'})
 & ffmpeg -y -hide_banner -loglevel error -f concat -safe 0 -i $concat -c copy -movflags +faststart $output
 if ($LASTEXITCODE -ne 0) { throw 'Assembly failed' }
 Write-Host $output

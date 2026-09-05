@@ -11,6 +11,7 @@ path = "src/main.rs"
 qemu-test-exit = []
 
 [dependencies]
+miniz_oxide = { version = "0.8.9", default-features = false }
 uefi = { version = "0.40.0", features = ["panic_handler"] }
 
 [profile.dev]

@@ -41,6 +41,7 @@ QEMU와 x86-64 EDK2 펌웨어가 필요하다.
 - `T`: TANEBI Studio 창 열기/닫기
 - `Esc`: 전원 화면
 - `D`: DOOM ARENA로 재부팅
+- `V`: 네이티브 미디어 플레이어 열기 (`Space`: 재생/일시정지)
 
 DOOM에서는 방향키로 이동·회전, `Space`로 사격, `E`로 문을 연다.
 게임 오디오는 현재 비활성화돼 있다.
@@ -61,7 +62,25 @@ DOOM은 기본 1280×800 모드에서 원본 320×200을 4배 정수 확대해 �
 
 DOOM은 커널 내부 프로세스가 아니다. 데스크톱이 CMOS 부팅 선택 값을 기록하고 재부팅하면 부트 매니저가 EDK II Shell과 UEFI DOOM을 실행한다. 데스크톱과 게임 모두 QEMU 가상 머신 안에서 실행된다. 게임을 종료한 뒤 QEMU를 재시작하면 데스크톱으로 돌아온다.
 
-네이티브 버전의 Studio는 빌드 시 생성된 TANEBI 결과를 표시한다. 웹판의 YouTube 플레이어, 네트워크, 동영상 디코더, 오디오 드라이버는 아직 네이티브 커널에 이식하지 않았다. 소개영상은 이 경계를 명시한다.
+네이티브 버전의 Studio는 빌드 시 생성된 TANEBI 결과를 표시한다. 미디어 플레이어는 빌드에 내장한 로컬 클립을 재생한다. 인터넷/YouTube 직접 스트리밍과 일반 MP4 파일 열기는 아직 지원하지 않는다.
+
+### 네이티브 미디어 플레이어
+
+데스크톱 `MEDIA PLAYER` 또는 시작 메뉴에서 연다. 재생/일시정지, 정지, ±5초 이동, 탐색 바, 음소거/해제를 지원한다. 초기 상태는 음소거다. 일반 QEMU 실행에서는 `UNMUTE`로 소리를 켜며, 최소화 테스트에서는 스피커로 출력하지 않는다.
+
+영상은 640×360 RGB565, 15fps 프레임별 DEFLATE로 저장하고 커널이 직접 압축을 풀어 그린다. 음성은 22,050Hz unsigned 8-bit mono PCM을 SB16/ISA DMA 이중 버퍼로 출력한다. 펌웨어 서비스 종료 이후에도 재생되며 브라우저나 호스트 플레이어를 이용하지 않는다.
+
+요청한 `https://www.youtube.com/watch?v=low-pfQAI0A&t=974s`의 16:14–16:44 구간은 로컬 빌드에만 내장했다. 제3자 영상/음원 및 이를 내장한 커널 이미지는 이 공개 저장소에 커밋하지 않는다. 새 체크아웃에서는 클립을 준비하지 않으면 `NO MEDIA`로 표시한다.
+
+```powershell
+# 해당 30초 클립 파일을 로컬에 준비한 경우
+.\scripts\prepare-media.ps1 -SourceVideo .\build\player-source.mp4
+.\scripts\build.ps1
+# 스피커 출력 없이 PCM 결과를 파일로 검증
+.\scripts\run.ps1 -SkipBuild -Background -AudioLog build\media-audio.wav
+```
+
+`scripts/capture-desktop-clean.ps1 -Media`는 최소화된 별도 VM에서 내부 프레임버퍼만 촬영한다. `scripts/render-native-fullframe.ps1 -Media`는 실제 클릭 표시와 일본어 해설을 포함한 2560×1600 소개영상을 만든다.
 
 이 버전은 실제로 UEFI에서 부팅한 뒤 펌웨어 부팅 서비스를 종료하는 bare-metal Stage 1이다. 이후 화면은 프레임버퍼 메모리에 직접 쓰고 키보드는 PS/2 I/O 포트에서 scan code를 읽는다.
 

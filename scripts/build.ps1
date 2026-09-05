@@ -54,6 +54,11 @@ Write-Host 'Building the Rust UEFI kernel...'
 & $rustup target add x86_64-unknown-uefi
 if ($LASTEXITCODE -ne 0) { throw 'Rust UEFI target installation failed.' }
 $env:TANEBI_SYSTEM_MANIFEST = $manifestOutput
+$mediaPath = Join-Path $buildRoot 'player.tmv'
+if (-not (Test-Path $mediaPath)) {
+    [IO.File]::WriteAllBytes($mediaPath, [byte[]]::new(0))
+}
+$env:TANEBI_MEDIA = $mediaPath
 $cargoArgs = @('build', '--manifest-path', $kernelManifest, '--target', 'x86_64-unknown-uefi')
 if ($Profile -eq 'release') { $cargoArgs += '--release' }
 if ($QemuTest) { $cargoArgs += @('--features', 'qemu-test-exit') }

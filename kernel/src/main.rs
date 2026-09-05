@@ -4,6 +4,8 @@
 
 mod font;
 mod mouse_packet;
+mod player;
+mod sound;
 
 use core::hint::spin_loop;
 use core::ptr::{read_volatile, write_volatile};
@@ -133,6 +135,7 @@ impl FrameBuffer {
 
 #[derive(Clone, Copy)]
 struct DesktopState {
+    player: player::Player,
     start_open: bool,
     studio_open: bool,
     power_open: bool,
@@ -350,7 +353,7 @@ fn draw_start_menu(frame: &mut FrameBuffer) {
     for item in [
         "TANEBI STUDIO",
         "DOOM ARENA",
-        "MY COMPUTER",
+        "MEDIA PLAYER",
         "DOCUMENTS",
         "SHUT DOWN",
     ] {
@@ -431,6 +434,7 @@ fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y
             match row {
                 0 => state.studio_open = true,
                 1 => return true,
+                2 => state.player.show(),
                 4 => state.power_open = true,
                 _ => {}
             }
@@ -440,6 +444,13 @@ fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y
         state.start_open = false;
     }
 
+    if state.player.click(frame, x, y) {
+        return false;
+    }
+    if x <= 120 && (455..=530).contains(&y) {
+        state.player.show();
+        return false;
+    }
     if state.studio_open {
         let window_width = (frame.width * 3 / 4)
             .max(520)
@@ -520,7 +531,38 @@ fn mouse_init() {
     serial_write("TANEBI95_MOUSE_READY\n");
 }
 
+struct DesktopBuffer(core::cell::UnsafeCell<[u8; 1920 * 1200 * 4]>);
+unsafe impl Sync for DesktopBuffer {}
+static DESKTOP_BUFFER: DesktopBuffer =
+    DesktopBuffer(core::cell::UnsafeCell::new([0; 1920 * 1200 * 4]));
+
 fn render(frame: &mut FrameBuffer, state: DesktopState) {
+    let size = frame.width * frame.height * 4;
+    if size > 1920 * 1200 * 4 {
+        return;
+    }
+    let base = DESKTOP_BUFFER.0.get().cast::<u8>();
+    let mut back = FrameBuffer {
+        base,
+        size,
+        width: frame.width,
+        height: frame.height,
+        stride: frame.width,
+        rgb: frame.rgb,
+    };
+    render_inner(&mut back, state);
+    for row in 0..frame.height {
+        let dest = row * frame.stride * 4;
+        let bytes = frame.width * 4;
+        if dest + bytes <= frame.size {
+            unsafe {
+                core::ptr::copy_nonoverlapping(base.add(row * bytes), frame.base.add(dest), bytes)
+            }
+        }
+    }
+}
+
+fn render_inner(frame: &mut FrameBuffer, state: DesktopState) {
     frame.fill_rect(0, 0, frame.width, frame.height, TEAL);
     draw_desktop_icon(
         frame,
@@ -540,7 +582,9 @@ fn render(frame: &mut FrameBuffer, state: DesktopState) {
     draw_doom_icon(frame, 38, 289);
     frame.text(28, 334, "DOOM ARENA", WHITE, 1);
     draw_desktop_icon(frame, 28, 376, "RECYCLE BIN", false);
+    draw_desktop_icon(frame, 28, 463, "MEDIA PLAYER", false);
     draw_window(frame, state);
+    state.player.draw(frame);
 
     let taskbar_y = frame.height.saturating_sub(42);
     frame.fill_rect(0, taskbar_y, frame.width, 42, SILVER);
@@ -555,6 +599,11 @@ fn render(frame: &mut FrameBuffer, state: DesktopState) {
         frame.text(128, taskbar_y + 16, "TANEBI STUDIO", BLACK, 1);
     }
     let clock_x = frame.width.saturating_sub(100);
+    if state.player.open {
+        frame.fill_rect(354, taskbar_y + 6, 230, 31, SILVER);
+        frame.bevel(354, taskbar_y + 6, 230, 31, false);
+        frame.text(366, taskbar_y + 16, "MEDIA PLAYER", BLACK, 1);
+    }
     frame.fill_rect(clock_x, taskbar_y + 6, 94, 31, SILVER);
     frame.bevel(clock_x, taskbar_y + 6, 94, 31, false);
     frame.text(clock_x + 24, taskbar_y + 16, "09:04", BLACK, 1);
@@ -576,7 +625,7 @@ fn render(frame: &mut FrameBuffer, state: DesktopState) {
     frame.text(
         26,
         taskbar_y.saturating_sub(22),
-        "MOUSE: CLICK   D: DOOM   S: START   T: STUDIO   ESC: POWER",
+        "MOUSE: CLICK   D: DOOM   S: START   T: STUDIO   V: VIDEO   ESC: POWER",
         WHITE,
         1,
     );
@@ -623,8 +672,14 @@ fn main() -> Status {
         stride,
         rgb,
     };
+    let clock_start = player::ticks();
+    boot::stall(core::time::Duration::from_millis(50));
+    let clock_hz = player::ticks().wrapping_sub(clock_start) * 20;
+    #[cfg(not(feature = "qemu-test-exit"))]
+    let mut sound = sound::Sound::reserve();
     #[allow(unused_mut)]
     let mut state = DesktopState {
+        player: player::Player::new(clock_hz),
         start_open: false,
         studio_open: true,
         power_open: false,
@@ -652,10 +707,23 @@ fn main() -> Status {
     #[cfg(not(feature = "qemu-test-exit"))]
     {
         mouse_init();
+        sound.init(clock_hz);
         let mut mouse = MouseState::new(frame.width, frame.height);
         toggle_mouse_cursor(&mut frame, &mouse);
 
         loop {
+            if state.player.update() {
+                sound.service(&state.player);
+                toggle_mouse_cursor(&mut frame, &mouse);
+                state.player.draw(&mut frame);
+                if state.start_open {
+                    draw_start_menu(&mut frame);
+                }
+                if state.power_open {
+                    draw_power(&mut frame);
+                }
+                toggle_mouse_cursor(&mut frame, &mouse);
+            }
             let controller_status = unsafe { inb(0x64) };
             if controller_status & 0x01 == 0 {
                 spin_loop();
@@ -684,6 +752,7 @@ fn main() -> Status {
                         if launch_doom {
                             request_doom_reboot();
                         }
+                        sound.service(&state.player);
                         render(&mut frame, state);
                         toggle_mouse_cursor(&mut frame, &mouse);
                     }
@@ -706,6 +775,11 @@ fn main() -> Status {
                     state.power_open = false;
                 }
                 0x20 => request_doom_reboot(),
+                0x2f => {
+                    state.player.show();
+                    state.start_open = false;
+                }
+                0x39 if state.player.open => state.player.toggle(),
                 0x01 => {
                     state.power_open = !state.power_open;
                     state.start_open = false;
@@ -713,6 +787,7 @@ fn main() -> Status {
                 _ => continue,
             }
             toggle_mouse_cursor(&mut frame, &mouse);
+            sound.service(&state.player);
             render(&mut frame, state);
             toggle_mouse_cursor(&mut frame, &mouse);
         }

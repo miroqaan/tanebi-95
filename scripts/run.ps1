@@ -3,6 +3,7 @@ param(
     [switch]$SkipBuild,
     [switch]$HeadlessTest,
     [switch]$Background,
+    [string]$AudioLog = '',
     [ValidateRange(0, 65535)]
     [int]$MonitorPort = 0,
     [string]$SerialLog = ''
@@ -36,6 +37,7 @@ $firmware = $firmwareCandidates | Where-Object { Test-Path -LiteralPath $_ } | S
 if (-not $firmware) { throw "No x86-64 UEFI firmware found below $qemuRoot." }
 
 $arguments = @(
+    '-name', 'TANEBI 95',
     '-machine', 'q35',
     '-m', '256M',
     '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
@@ -44,6 +46,10 @@ $arguments = @(
 )
 
 if ($HeadlessTest) { $arguments += '-no-reboot' }
+if ($AudioLog) { $arguments += @('-audiodev',"wav,id=media,path=$AudioLog") }
+elseif ($HeadlessTest) { $arguments += @('-audiodev','none,id=media') }
+else { $arguments += @('-audiodev','dsound,id=media') }
+$arguments += @('-device','sb16,audiodev=media')
 
 if ($HeadlessTest -or -not $SerialLog) {
     $arguments += @('-serial', 'stdio')
