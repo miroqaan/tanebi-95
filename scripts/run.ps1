@@ -2,6 +2,7 @@
 param(
     [switch]$SkipBuild,
     [switch]$HeadlessTest,
+    [switch]$Background,
     [ValidateRange(0, 65535)]
     [int]$MonitorPort = 0,
     [string]$SerialLog = ''
@@ -57,7 +58,7 @@ if ($MonitorPort -gt 0) {
 else {
     $arguments += @('-monitor', 'none')
 }
-if ($HeadlessTest) { $arguments += @('-display', 'none') }
+if ($HeadlessTest -or $Background) { $arguments += @('-display', 'none') }
 
 if ($HeadlessTest) {
     $qemuOutput = & $qemu @arguments 2>&1

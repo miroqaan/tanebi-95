@@ -51,6 +51,10 @@ DOOM에서는 방향키로 이동·회전, `Space`로 사격, `E`로 문을 연�
 - `START` 버튼과 시작 메뉴 항목 클릭
 - Studio 창의 닫기 버튼 클릭
 
+현재 입력은 PS/2 상대 좌표 방식이다. QEMU 화면을 클릭해 마우스를 캡처한 뒤 게스트 내부 포인터를 기준으로 조작한다.
+빠른 이동도 패킷 헤더의 9비트 부호를 사용해 처리하며, 오버플로가 표시된 축은 무시한다.
+창을 띄우지 않는 백그라운드 테스트는 `scripts/run.ps1 -SkipBuild -Background -MonitorPort 45454`로 실행한다.
+
 ## 현재 경계
 
 DOOM은 커널 내부 프로세스가 아니다. 데스크톱이 CMOS 부팅 선택 값을 기록하고 재부팅하면 부트 매니저가 EDK II Shell과 UEFI DOOM을 실행한다. 데스크톱과 게임 모두 QEMU 가상 머신 안에서 실행된다. 게임을 종료한 뒤 QEMU를 재시작하면 데스크톱으로 돌아온다.
@@ -67,7 +71,7 @@ DOOM은 커널 내부 프로세스가 아니다. 데스크톱이 CMOS 부팅 선
 .\scripts\test.ps1
 ```
 
-테스트는 TANEBI 매니페스트, UEFI PE, FAT16 구조를 검사하고 QEMU에서 `ExitBootServices` 이후 bare-metal marker까지 확인한다.
+테스트는 PS/2 이동 값 262,144개 조합과 오버플로 처리, TANEBI 매니페스트, UEFI PE, FAT16 구조를 검사하고 QEMU에서 `ExitBootServices` 이후 bare-metal marker까지 확인한다.
 
 ## 프로젝트 구조
 

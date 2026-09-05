@@ -3,6 +3,7 @@
 #![cfg_attr(feature = "qemu-test-exit", allow(dead_code))]
 
 mod font;
+mod mouse_packet;
 
 use core::hint::spin_loop;
 use core::ptr::{read_volatile, write_volatile};
@@ -169,8 +170,7 @@ impl MouseState {
 
         let old_left = self.left_down;
         self.left_down = self.packet[0] & 0x01 != 0;
-        let dx = self.packet[1] as i8 as isize;
-        let dy = self.packet[2] as i8 as isize;
+        let (dx, dy) = mouse_packet::motion(self.packet);
         self.x = self
             .x
             .saturating_add_signed(dx)
@@ -412,7 +412,7 @@ fn toggle_mouse_cursor(frame: &mut FrameBuffer, mouse: &MouseState) {
 fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y: usize) -> bool {
     let taskbar_y = frame.height.saturating_sub(42);
 
-    if x <= 112 && y >= taskbar_y {
+    if (5..107).contains(&x) && (taskbar_y + 6..taskbar_y + 37).contains(&y) {
         state.start_open = !state.start_open;
         state.power_open = false;
         return false;
@@ -440,15 +440,6 @@ fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y
         state.start_open = false;
     }
 
-    if x <= 120 && (105..=198).contains(&y) {
-        state.studio_open = true;
-        return false;
-    }
-
-    if x <= 120 && (279..=370).contains(&y) {
-        return true;
-    }
-
     if state.studio_open {
         let window_width = (frame.width * 3 / 4)
             .max(520)
@@ -458,13 +449,22 @@ fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y
             .min(frame.height.saturating_sub(100));
         let window_x = (frame.width - window_width) / 2;
         let window_y = (frame.height - window_height) / 2 - 16;
-        if x >= window_x + window_width.saturating_sub(28)
-            && x <= window_x + window_width
-            && y >= window_y
-            && y <= window_y + 34
+        if (window_x + window_width - 24..window_x + window_width - 5).contains(&x)
+            && (window_y + 7..window_y + 26).contains(&y)
         {
             state.studio_open = false;
         }
+        if (window_x..window_x + window_width).contains(&x)
+            && (window_y..window_y + window_height).contains(&y)
+        {
+            return false;
+        }
+    }
+    if x <= 120 && (105..=198).contains(&y) {
+        state.studio_open = true;
+    }
+    if x <= 120 && (279..=370).contains(&y) {
+        return true;
     }
     false
 }

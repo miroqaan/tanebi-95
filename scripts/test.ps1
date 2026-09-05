@@ -5,6 +5,13 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $buildRoot = Join-Path $repositoryRoot 'build'
 
+New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
+$mouseTests = Join-Path $buildRoot 'mouse-packet-tests.exe'
+& rustc --test (Join-Path $repositoryRoot 'kernel\src\mouse_packet.rs') -o $mouseTests
+if ($LASTEXITCODE -ne 0) { throw 'Mouse packet test compilation failed.' }
+& $mouseTests
+if ($LASTEXITCODE -ne 0) { throw 'Mouse packet regression tests failed.' }
+
 & (Join-Path $PSScriptRoot 'build.ps1') -Profile release -QemuTest
 
 $efi = Join-Path $buildRoot 'esp\EFI\BOOT\BOOTX64.EFI'
