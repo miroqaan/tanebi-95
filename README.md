@@ -55,7 +55,7 @@ DOOM은 기본 1280×800 모드에서 원본 320×200을 4배 정수 확대해 �
 
 현재 입력은 PS/2 상대 좌표 방식이다. QEMU 화면을 클릭해 마우스를 캡처한 뒤 게스트 내부 포인터를 기준으로 조작한다.
 빠른 이동도 패킷 헤더의 9비트 부호를 사용해 처리하며, 오버플로가 표시된 축은 무시한다.
-창을 띄우지 않는 백그라운드 테스트는 `scripts/run.ps1 -SkipBuild -Background -MonitorPort 45454`로 실행한다.
+최소화한 창에서 백그라운드 실행하려면 `scripts/run.ps1 -SkipBuild -Background -MonitorPort 45454`를 사용한다. `HeadlessTest`만 화면 없이 실행한다.
 
 ## 현재 경계
 

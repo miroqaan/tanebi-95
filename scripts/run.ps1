@@ -58,7 +58,8 @@ if ($MonitorPort -gt 0) {
 else {
     $arguments += @('-monitor', 'none')
 }
-if ($HeadlessTest -or $Background) { $arguments += @('-display', 'none') }
+if ($HeadlessTest) { $arguments += @('-display', 'none') }
+else { $arguments += @('-display', 'gtk,zoom-to-fit=on') }
 
 if ($HeadlessTest) {
     $qemuOutput = & $qemu @arguments 2>&1
@@ -72,4 +73,10 @@ if ($HeadlessTest) {
     return
 }
 
-& $qemu @arguments
+if ($Background) {
+    $quotedArguments = $arguments | ForEach-Object { '"' + $_ + '"' }
+    Start-Process -FilePath $qemu -ArgumentList $quotedArguments -WindowStyle Minimized -Wait
+}
+else {
+    & $qemu @arguments
+}
