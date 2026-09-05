@@ -11,7 +11,7 @@
 - 32MiB FAT16 x86-64 UEFI 부팅 이미지
 - `ExitBootServices` 이후 bare-metal 실행
 - GOP 프레임버퍼 직접 렌더링
-- PS/2 I/O 포트 기반 키보드 입력
+- PS/2 I/O 포트 기반 키보드·마우스 입력과 소프트웨어 커서
 - TANEBI 스크립트로 생성하는 결정론적 부팅 매니페스트
 - TANEBI Studio, 시작 메뉴, 전원 화면
 
@@ -39,6 +39,12 @@ QEMU와 x86-64 EDK2 펌웨어가 필요하다.
 - `S`: 시작 메뉴
 - `T`: TANEBI Studio 창 열기/닫기
 - `Esc`: 전원 화면
+
+마우스:
+
+- 바탕화면의 `TANEBI STUDIO` 아이콘 클릭
+- `START` 버튼과 시작 메뉴 항목 클릭
+- Studio 창의 닫기 버튼 클릭
 
 ## 현재 경계
 

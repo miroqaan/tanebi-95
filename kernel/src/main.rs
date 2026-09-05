@@ -1,10 +1,11 @@
 #![no_main]
 #![no_std]
+#![cfg_attr(feature = "qemu-test-exit", allow(dead_code))]
 
 mod font;
 
 use core::hint::spin_loop;
-use core::ptr::write_volatile;
+use core::ptr::{read_volatile, write_volatile};
 use uefi::boot;
 use uefi::prelude::*;
 use uefi::proto::console::gop::{GraphicsOutput, PixelFormat};
@@ -66,6 +67,22 @@ impl FrameBuffer {
         }
     }
 
+    fn xor_pixel(&mut self, x: usize, y: usize) {
+        if x >= self.width || y >= self.height {
+            return;
+        }
+        let offset = (y * self.stride + x) * 4;
+        if offset + 2 >= self.size {
+            return;
+        }
+        unsafe {
+            for channel in 0..3 {
+                let byte = self.base.add(offset + channel);
+                write_volatile(byte, read_volatile(byte) ^ 0xff);
+            }
+        }
+    }
+
     fn line_h(&mut self, x: usize, y: usize, width: usize, color: Color) {
         self.fill_rect(x, y, width, 1, color);
     }
@@ -118,6 +135,52 @@ struct DesktopState {
     start_open: bool,
     studio_open: bool,
     power_open: bool,
+}
+
+struct MouseState {
+    packet: [u8; 3],
+    index: usize,
+    x: usize,
+    y: usize,
+    left_down: bool,
+}
+
+impl MouseState {
+    fn new(width: usize, height: usize) -> Self {
+        Self {
+            packet: [0; 3],
+            index: 0,
+            x: width / 2,
+            y: height / 2,
+            left_down: false,
+        }
+    }
+
+    fn feed(&mut self, byte: u8, width: usize, height: usize) -> Option<(bool, bool)> {
+        if self.index == 0 && byte & 0x08 == 0 {
+            return None;
+        }
+        self.packet[self.index] = byte;
+        self.index += 1;
+        if self.index < 3 {
+            return None;
+        }
+        self.index = 0;
+
+        let old_left = self.left_down;
+        self.left_down = self.packet[0] & 0x01 != 0;
+        let dx = self.packet[1] as i8 as isize;
+        let dy = self.packet[2] as i8 as isize;
+        self.x = self
+            .x
+            .saturating_add_signed(dx)
+            .min(width.saturating_sub(1));
+        self.y = self
+            .y
+            .saturating_add_signed(-dy)
+            .min(height.saturating_sub(1));
+        Some((!old_left && self.left_down, dx != 0 || dy != 0))
+    }
 }
 
 fn manifest_value(key: &str, fallback: &'static str) -> &'static str {
@@ -310,6 +373,141 @@ fn draw_power(frame: &mut FrameBuffer) {
     frame.text(x + 95, y + 112, "PRESS ESC TO RETURN", NAVY, 1);
 }
 
+fn toggle_mouse_cursor(frame: &mut FrameBuffer, mouse: &MouseState) {
+    const CURSOR: [&str; 18] = [
+        "X...........",
+        "XX..........",
+        "X.X.........",
+        "X..X........",
+        "X...X.......",
+        "X....X......",
+        "X.....X.....",
+        "X......X....",
+        "X.......X...",
+        "X........X..",
+        "X.....XXXX..",
+        "X..X..X.....",
+        "X.X.X..X....",
+        "XX..X..X....",
+        "X....X..X...",
+        ".....X..X...",
+        "......XX....",
+        "............",
+    ];
+    for (row, line) in CURSOR.iter().enumerate() {
+        for (column, pixel) in line.bytes().enumerate() {
+            if pixel == b'X' {
+                frame.xor_pixel(mouse.x + column, mouse.y + row);
+            }
+        }
+    }
+}
+
+fn handle_mouse_click(frame: &FrameBuffer, state: &mut DesktopState, x: usize, y: usize) {
+    let taskbar_y = frame.height.saturating_sub(42);
+
+    if x <= 112 && y >= taskbar_y {
+        state.start_open = !state.start_open;
+        state.power_open = false;
+        return;
+    }
+
+    if state.power_open {
+        state.power_open = false;
+        return;
+    }
+
+    if state.start_open {
+        let menu_height = 250usize.min(taskbar_y.saturating_sub(20));
+        let menu_y = taskbar_y.saturating_sub(menu_height);
+        if x >= 44 && x <= 264 && y >= menu_y + 6 && y <= taskbar_y {
+            let row = y.saturating_sub(menu_y + 5) / 40;
+            match row {
+                0 => state.studio_open = true,
+                4 => state.power_open = true,
+                _ => {}
+            }
+            state.start_open = false;
+            return;
+        }
+        state.start_open = false;
+    }
+
+    if x <= 120 && (105..=198).contains(&y) {
+        state.studio_open = true;
+        return;
+    }
+
+    if state.studio_open {
+        let window_width = (frame.width * 3 / 4)
+            .max(520)
+            .min(frame.width.saturating_sub(80));
+        let window_height = (frame.height * 2 / 3)
+            .max(330)
+            .min(frame.height.saturating_sub(100));
+        let window_x = (frame.width - window_width) / 2;
+        let window_y = (frame.height - window_height) / 2 - 16;
+        if x >= window_x + window_width.saturating_sub(28)
+            && x <= window_x + window_width
+            && y >= window_y
+            && y <= window_y + 34
+        {
+            state.studio_open = false;
+        }
+    }
+}
+
+fn mouse_write(value: u8) {
+    wait_controller_write();
+    unsafe { outb(0x64, 0xd4) };
+    wait_controller_write();
+    unsafe { outb(0x60, value) };
+}
+
+fn mouse_read() -> u8 {
+    wait_controller_read();
+    unsafe { inb(0x60) }
+}
+
+fn wait_controller_write() {
+    for _ in 0..100_000 {
+        if unsafe { inb(0x64) } & 0x02 == 0 {
+            return;
+        }
+        spin_loop();
+    }
+}
+
+fn wait_controller_read() {
+    for _ in 0..100_000 {
+        if unsafe { inb(0x64) } & 0x01 != 0 {
+            return;
+        }
+        spin_loop();
+    }
+}
+
+fn mouse_init() {
+    wait_controller_write();
+    unsafe { outb(0x64, 0xa8) };
+
+    wait_controller_write();
+    unsafe { outb(0x64, 0x20) };
+    let mut command = mouse_read();
+    command |= 0x02;
+    command &= !0x20;
+    wait_controller_write();
+    unsafe { outb(0x64, 0x60) };
+    wait_controller_write();
+    unsafe { outb(0x60, command) };
+
+    mouse_write(0xf6);
+    let _ = mouse_read();
+    mouse_write(0xf4);
+    let _ = mouse_read();
+    serial_write("TANEBI95_MOUSE_READY\n");
+}
+
 fn render(frame: &mut FrameBuffer, state: DesktopState) {
     frame.fill_rect(0, 0, frame.width, frame.height, TEAL);
     draw_desktop_icon(
@@ -364,7 +562,7 @@ fn render(frame: &mut FrameBuffer, state: DesktopState) {
     frame.text(
         26,
         taskbar_y.saturating_sub(22),
-        "S: START   T: STUDIO   ESC: POWER",
+        "MOUSE: CLICK   S: START   T: STUDIO   ESC: POWER",
         WHITE,
         1,
     );
@@ -438,32 +636,68 @@ fn main() -> Status {
     }
 
     #[cfg(not(feature = "qemu-test-exit"))]
-    loop {
-        if unsafe { inb(0x64) } & 0x01 == 0 {
-            spin_loop();
-            continue;
-        }
-        let scan_code = unsafe { inb(0x60) };
-        if scan_code & 0x80 != 0 {
-            continue;
-        }
-        match scan_code {
-            0x1f => {
-                state.start_open = !state.start_open;
-                state.power_open = false;
+    {
+        mouse_init();
+        let mut mouse = MouseState::new(frame.width, frame.height);
+        toggle_mouse_cursor(&mut frame, &mouse);
+
+        loop {
+            let controller_status = unsafe { inb(0x64) };
+            if controller_status & 0x01 == 0 {
+                spin_loop();
+                continue;
             }
-            0x14 => {
-                state.studio_open = !state.studio_open;
-                state.start_open = false;
-                state.power_open = false;
+            let data = unsafe { inb(0x60) };
+
+            if controller_status & 0x20 != 0 {
+                let old_x = mouse.x;
+                let old_y = mouse.y;
+                if let Some((clicked, moved)) = mouse.feed(data, frame.width, frame.height) {
+                    if moved {
+                        let old_mouse = MouseState {
+                            packet: [0; 3],
+                            index: 0,
+                            x: old_x,
+                            y: old_y,
+                            left_down: false,
+                        };
+                        toggle_mouse_cursor(&mut frame, &old_mouse);
+                        toggle_mouse_cursor(&mut frame, &mouse);
+                    }
+                    if clicked {
+                        toggle_mouse_cursor(&mut frame, &mouse);
+                        handle_mouse_click(&frame, &mut state, mouse.x, mouse.y);
+                        render(&mut frame, state);
+                        toggle_mouse_cursor(&mut frame, &mouse);
+                    }
+                }
+                continue;
             }
-            0x01 => {
-                state.power_open = !state.power_open;
-                state.start_open = false;
+
+            let scan_code = data;
+            if scan_code & 0x80 != 0 {
+                continue;
             }
-            _ => continue,
+            match scan_code {
+                0x1f => {
+                    state.start_open = !state.start_open;
+                    state.power_open = false;
+                }
+                0x14 => {
+                    state.studio_open = !state.studio_open;
+                    state.start_open = false;
+                    state.power_open = false;
+                }
+                0x01 => {
+                    state.power_open = !state.power_open;
+                    state.start_open = false;
+                }
+                _ => continue,
+            }
+            toggle_mouse_cursor(&mut frame, &mouse);
+            render(&mut frame, state);
+            toggle_mouse_cursor(&mut frame, &mouse);
         }
-        render(&mut frame, state);
     }
 
     #[allow(unreachable_code)]

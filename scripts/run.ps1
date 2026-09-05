@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
-    [switch]$HeadlessTest
+    [switch]$HeadlessTest,
+    [ValidateRange(0, 65535)]
+    [int]$MonitorPort = 0,
+    [string]$SerialLog = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,10 +40,22 @@ $arguments = @(
     '-drive', "if=pflash,format=raw,readonly=on,file=$firmware",
     '-drive', "format=raw,file=$image",
     '-device', 'isa-debug-exit,iobase=0xf4,iosize=0x04',
-    '-serial', 'stdio',
-    '-monitor', 'none',
     '-no-reboot'
 )
+
+if ($HeadlessTest -or -not $SerialLog) {
+    $arguments += @('-serial', 'stdio')
+}
+else {
+    $arguments += @('-serial', "file:$SerialLog")
+}
+
+if ($MonitorPort -gt 0) {
+    $arguments += @('-monitor', "tcp:127.0.0.1:$MonitorPort,server=on,wait=off")
+}
+else {
+    $arguments += @('-monitor', 'none')
+}
 if ($HeadlessTest) { $arguments += @('-display', 'none') }
 
 if ($HeadlessTest) {
