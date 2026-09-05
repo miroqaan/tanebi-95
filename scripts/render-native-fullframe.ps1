@@ -24,14 +24,16 @@ if($CleanInput) {
 }
 if($Media){
     $mediaScene=@{File='player-capture\desktop.mp4';Start=0;Duration=36;Crop='';Title='03  ネイティブ・メディアプレイヤー';Text='メディアプレイヤーを開き、再生をクリックします。指定された動画の16分14秒から、30秒の区間をOSに内蔵しました。これはウェブページではなく、ネイティブの動画再生です。音声出力にも対応しています。一時停止して5秒先へ移動し、再生を再開。シークバーで好きな位置へ移り、停止すると先頭へ戻ります。最後にウィンドウを閉じます。現在はオフライン再生で、YouTubeへの直接接続ではありません。';Clicks=@(@{T=1.7;X=60;Y=480},@{T=3.7;X=190;Y=681},@{T=6.2;X=600;Y=681},@{T=12.2;X=190;Y=681},@{T=14.7;X=495;Y=681},@{T=17.2;X=190;Y=681},@{T=26.2;X=900;Y=681},@{T=31.2;X=290;Y=681},@{T=33.7;X=1123;Y=68})}
-    $audioScene=@{File='player-capture\desktop.mp4';Start=6.3;Duration=4;Crop='';Title='04  ネイティブ音声 — 実出力';AudioFile='player-capture\audio.wav'}
+    $mediaScene.Clicks=@($mediaScene.Clicks | Where-Object {$_.T -ne 6.2})
+    $audioScene=@{File='player-capture\desktop.mp4';Start=3.8;Duration=4;Crop='';Title='04  ネイティブ音声 — 実出力';AudioFile='player-capture\audio.wav'}
     $scenes[2].Title='05  DOOM — 実際の戦闘'
     $scenes=@($scenes[0],$scenes[1],$mediaScene,$audioScene,$scenes[2])
 }
 if($CleanInput){
     # Keep narration within the recorded action, so pointer motion stays real-time.
     $scenes[0].Text='タネビ95。実際のOS画面を操作します。ウィンドウを閉じ、スタートメニューからスタジオを開きます。'
-    $scenes[1].Text='今度はデスクトップのアイコンからスタジオを開きます。タネビのプログラムと、ビルド時の実行結果を表示しています。'
+    $scenes[1].Title='02  TANEBIとOSの構成'
+    $scenes[1].Text='タネビで起動プログラムを書き、ビルド時に実行した結果をRustのカーネルへ組み込みます。QEMUとUEFIで起動し、Rustが画面、入力、プレイヤーを担当します。'
 }
 if($Media){
     $scenes[2].Text='プレイヤーを開いて再生。指定された動画の16分14秒から、30秒の区間を内蔵しています。音声もネイティブ出力です。一時停止し、5秒先へ移動。再開後はシークバーで位置を変え、停止すると先頭へ戻ります。最後にウィンドウを閉じます。これはオフライン再生で、YouTubeへの直接接続ではありません。'

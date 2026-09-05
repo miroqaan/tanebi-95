@@ -28,6 +28,25 @@ try {
     }
     Wait-Prompt
     function Send([string]$command) { $writer.WriteLine($command); Wait-Prompt }
+    if($Media){
+        # Set up audio before recording; the introduction must not show a mute click.
+        $setupX=640; $setupY=400
+        function Move-Setup([int]$targetX,[int]$targetY){
+            while($script:setupX -ne $targetX -or $script:setupY -ne $targetY){
+                $dx=[math]::Clamp($targetX-$script:setupX,-100,100)
+                $dy=[math]::Clamp($targetY-$script:setupY,-100,100)
+                Send "mouse_move $dx $dy"
+                $script:setupX+=$dx; $script:setupY+=$dy
+                Start-Sleep -Milliseconds 20
+            }
+        }
+        Send 'sendkey v 80'; Start-Sleep -Milliseconds 200
+        Move-Setup 600 681
+        Send 'mouse_button 1'; Start-Sleep -Milliseconds 150; Send 'mouse_button 0'
+        Move-Setup 1123 68
+        Send 'mouse_button 1'; Start-Sleep -Milliseconds 150; Send 'mouse_button 0'
+        Move-Setup 640 400
+    }
     $psi=[Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg).Source)
     $psi.Arguments='-y -loglevel error -f image2pipe -vcodec ppm -framerate '+$Fps+' -i - -an -c:v libx264 -preset fast -crf 12 -pix_fmt yuv420p "'+$out+'\desktop.mp4"'
     $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardInput=$true
@@ -47,7 +66,7 @@ try {
         $points=@(
             @{F=0;X=640;Y=400},@{F=15;X=60;Y=480},@{F=23;X=60;Y=480},
             @{F=35;X=190;Y=681},@{F=45;X=190;Y=681},
-            @{F=60;X=600;Y=681},@{F=110;X=600;Y=681},
+            @{F=60;X=190;Y=681},@{F=110;X=190;Y=681},
             @{F=120;X=190;Y=681},@{F=132;X=190;Y=681},
             @{F=145;X=495;Y=681},@{F=155;X=495;Y=681},
             @{F=170;X=190;Y=681},@{F=250;X=190;Y=681},
@@ -55,7 +74,7 @@ try {
             @{F=310;X=290;Y=681},@{F=320;X=290;Y=681},
             @{F=335;X=1123;Y=68},@{F=359;X=1123;Y=68}
         )
-        $clicks=@(17,37,62,122,147,172,262,312,337);$count=360
+        $clicks=@(17,37,122,147,172,262,312,337);$count=360
     }
     # Original cue positions are in tenths of a second; retain their timing.
     $factor=$Fps/10
