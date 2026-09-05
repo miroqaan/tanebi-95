@@ -152,6 +152,24 @@ impl Player {
         true
     }
     pub fn draw(&self, frame: &mut FrameBuffer) {
+        self.draw_internal(frame, None, false, false);
+    }
+    pub fn draw_live(
+        &self,
+        frame: &mut FrameBuffer,
+        mouse: &crate::MouseState,
+        menu: bool,
+        power: bool,
+    ) {
+        self.draw_internal(frame, Some(mouse), menu, power);
+    }
+    fn draw_internal(
+        &self,
+        frame: &mut FrameBuffer,
+        cursor: Option<&crate::MouseState>,
+        menu: bool,
+        power: bool,
+    ) {
         if !self.open {
             return;
         }
@@ -169,6 +187,11 @@ impl Player {
             rgb: frame.rgb,
         };
         self.draw_buffer(&mut back);
+        // Leave the visible cursor alone during the expensive decode/scale.
+        // Erase it only for presentation, then restore it immediately.
+        if let Some(mouse) = cursor {
+            crate::toggle_mouse_cursor(frame, mouse);
+        }
         let (x, y, w, h) = Self::geometry(frame);
         // Present the finished window only; decoding and clears are never visible.
         for row in y..(y + h).min(frame.height) {
@@ -183,6 +206,15 @@ impl Player {
                     )
                 }
             }
+        }
+        if menu {
+            crate::draw_start_menu(frame);
+        }
+        if power {
+            crate::draw_power(frame);
+        }
+        if let Some(mouse) = cursor {
+            crate::toggle_mouse_cursor(frame, mouse);
         }
     }
     fn draw_buffer(&self, frame: &mut FrameBuffer) {

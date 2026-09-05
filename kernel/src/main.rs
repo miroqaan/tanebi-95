@@ -712,20 +712,15 @@ fn main() -> Status {
         toggle_mouse_cursor(&mut frame, &mouse);
 
         loop {
-            if state.player.update() {
-                sound.service(&state.player);
-                toggle_mouse_cursor(&mut frame, &mouse);
-                state.player.draw(&mut frame);
-                if state.start_open {
-                    draw_start_menu(&mut frame);
-                }
-                if state.power_open {
-                    draw_power(&mut frame);
-                }
-                toggle_mouse_cursor(&mut frame, &mouse);
-            }
             let controller_status = unsafe { inb(0x64) };
             if controller_status & 0x01 == 0 {
+                // Drain pending PS/2 bytes before spending time on video.
+                if state.player.update() {
+                    sound.service(&state.player);
+                    state
+                        .player
+                        .draw_live(&mut frame, &mouse, state.start_open, state.power_open);
+                }
                 spin_loop();
                 continue;
             }

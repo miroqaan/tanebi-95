@@ -12,6 +12,7 @@ Verified on 2026-09-05 with Windows QEMU, q35, EDK2 and SB16.
 - Serial log reports `TANEBI95_SB16_READY` and `TANEBI95_AUDIO_PLAY`.
 - QEMU WAV output contains non-silent audio: mean -17.4 dB, peak -2.1 dB. Testing sent output to a WAV file, not speakers.
 - Narrated introduction uses guest-only frame captures, synchronized click markers and 2560×1600 full-frame output. Host pointer is not captured.
+- Smooth-pointer revision: guest-only capture is now 30 fps (720 desktop frames / 24 seconds), not 10 fps. Pending PS/2 input is drained before video work, and the pointer remains visible while a video frame is decoded offscreen.
 
 Media payloads, WAV recordings and encoded videos remain in ignored `build/`. Only code is committed publicly. Use `prepare-media.ps1` with a locally supplied clip to reproduce the player payload.
 

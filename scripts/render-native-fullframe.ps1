@@ -28,6 +28,14 @@ if($Media){
     $scenes[2].Title='05  DOOM — 実際の戦闘'
     $scenes=@($scenes[0],$scenes[1],$mediaScene,$audioScene,$scenes[2])
 }
+if($CleanInput){
+    # Keep narration within the recorded action, so pointer motion stays real-time.
+    $scenes[0].Text='タネビ95。実際のOS画面を操作します。ウィンドウを閉じ、スタートメニューからスタジオを開きます。'
+    $scenes[1].Text='今度はデスクトップのアイコンからスタジオを開きます。タネビのプログラムと、ビルド時の実行結果を表示しています。'
+}
+if($Media){
+    $scenes[2].Text='プレイヤーを開いて再生。指定された動画の16分14秒から、30秒の区間を内蔵しています。音声もネイティブ出力です。一時停止し、5秒先へ移動。再開後はシークバーで位置を変え、停止すると先頭へ戻ります。最後にウィンドウを閉じます。これはオフライン再生で、YouTubeへの直接接続ではありません。'
+}
 for ($i=0; $i -lt $scenes.Count; $i++) {
     $scene=$scenes[$i]; $n=$i+1
     $audio=Join-Path $out "$n.mp3"

@@ -1,4 +1,4 @@
-param([switch]$Media)
+param([switch]$Media,[ValidateSet(10,30)][int]$Fps=30)
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $out=Join-Path $root $(if($Media){'build\player-capture'}else{'build\clean-capture'})
@@ -29,7 +29,7 @@ try {
     Wait-Prompt
     function Send([string]$command) { $writer.WriteLine($command); Wait-Prompt }
     $psi=[Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg).Source)
-    $psi.Arguments='-y -loglevel error -f image2pipe -vcodec ppm -framerate 10 -i - -an -c:v libx264 -preset fast -crf 12 -pix_fmt yuv420p "'+$out+'\desktop.mp4"'
+    $psi.Arguments='-y -loglevel error -f image2pipe -vcodec ppm -framerate '+$Fps+' -i - -an -c:v libx264 -preset fast -crf 12 -pix_fmt yuv420p "'+$out+'\desktop.mp4"'
     $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardInput=$true
     $encoder=[Diagnostics.Process]::Start($psi)
     $points=@(
@@ -57,6 +57,11 @@ try {
         )
         $clicks=@(17,37,62,122,147,172,262,312,337);$count=360
     }
+    # Original cue positions are in tenths of a second; retain their timing.
+    $factor=$Fps/10
+    foreach($point in $points){$point.F=[int]($point.F*$factor)}
+    $clicks=@($clicks | ForEach-Object {[int]($_*$factor)})
+    $count=[int]($count*$factor)
     for($f=0;$f -lt $count;$f++) {
         $clock=[Diagnostics.Stopwatch]::StartNew()
         for($p=1;$p -lt $points.Count;$p++) {
@@ -68,11 +73,11 @@ try {
             }
         }
         if($clicks -contains $f){ Send 'mouse_button 1' }
-        if($clicks -contains ($f-2)){ Send 'mouse_button 0' }
+        if($clicks -contains ($f-[int](2*$factor))){ Send 'mouse_button 0' }
         Send ('screendump '+($out.Replace('\','/')+'/frame.ppm'))
         $bytes=[IO.File]::ReadAllBytes("$out\frame.ppm")
         $encoder.StandardInput.BaseStream.Write($bytes,0,$bytes.Length)
-        $wait=100-$clock.ElapsedMilliseconds
+        $wait=1000.0/$Fps-$clock.Elapsed.TotalMilliseconds
         if($wait -gt 0){Start-Sleep -Milliseconds $wait}
     }
     $encoder.StandardInput.Close(); $encoder.WaitForExit()
