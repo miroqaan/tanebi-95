@@ -1,0 +1,107 @@
+# SB16 unsigned 8-bit mono PCM。DMAの二つの半区間をポーリングで補充する。
+# DMA_BASEはUEFIで確保済みの64KiB境界、16MiB未満の物理アドレス。
+global SOUND_READY:bool = false;
+global SOUND_ACTIVE:bool = false;
+global SOUND_REVISION:u64 = 0xffffffffffffffff;
+global SOUND_NEXT:u64 = 0;
+global SOUND_HALF:u64 = 0;
+
+fn sound_command(value:u64) {
+    let tries:u64 = 0;
+    while tries < 100000 {
+        if (in8(0x22c) & 0x80) == 0 {
+            out8(0x22c,value);
+            return;
+        }
+        tries = tries + 1;
+    }
+}
+
+fn sound_init() {
+    if DMA_BASE == 0 || DMA_BASE >= 0x1000000 || (DMA_BASE & 65535) != 0 { return; }
+    # IRQ5をマスクし、DMA残量の変化をメインループから監視する。
+    out8(0x21,in8(0x21) | 0x20);
+    out8(0x226,1);
+    let start:u64 = ticks();
+    while ticks() - start < CLOCK_HZ / 1000 { pause(); }
+    out8(0x226,0);
+    let tries:u64 = 0;
+    while tries < 100000 {
+        if (in8(0x22e) & 0x80) != 0 && in8(0x22a) == 0xaa {
+            SOUND_READY = true;
+            break;
+        }
+        tries = tries + 1;
+    }
+    if SOUND_READY {
+        out8(0x224,0x22); out8(0x225,0xff);
+        out8(0x224,0x04); out8(0x225,0xff);
+        serial("TANEBI95_SB16_READY\n");
+    }
+}
+
+fn sound_fill(half:u64) {
+    let target:u64 = DMA_BASE + half * 32768;
+    let available:u64 = ui_sub(MEDIA_AUDIO_LENGTH,SOUND_NEXT);
+    let length:u64 = ui_min(available,32768);
+    if MEDIA_VALID && length > 0 { copy(target,MEDIA_AUDIO_BASE + SOUND_NEXT,length); }
+    let i:u64 = length;
+    # unsigned PCMの無音値は128。終端を0で埋めるとクリック音になる。
+    while i + 8 <= 32768 {
+        store64(target + i,0x8080808080808080);
+        i = i + 8;
+    }
+    while i < 32768 { store8(target + i,128); i = i + 1; }
+    SOUND_NEXT = SOUND_NEXT + 32768;
+}
+
+fn sound_stop() {
+    sound_command(0xd0);
+    sound_command(0xd3);
+    out8(0x0a,5);
+    SOUND_ACTIVE = false;
+}
+
+fn sound_service() {
+    if !SOUND_READY { return; }
+    if SOUND_REVISION != PLAYER_REVISION {
+        SOUND_REVISION = PLAYER_REVISION;
+        sound_stop();
+        if MEDIA_VALID && PLAYER_OPEN && PLAYER_PLAYING && !PLAYER_MUTED {
+            SOUND_NEXT = player_sample();
+            sound_fill(0);
+            sound_fill(1);
+            SOUND_HALF = 0;
+            out8(0x0c,0);
+            out8(0x0b,0x59);
+            out8(0x02,DMA_BASE & 255);
+            out8(0x02,(DMA_BASE >> 8) & 255);
+            out8(0x83,(DMA_BASE >> 16) & 255);
+            out8(0x0c,0);
+            out8(0x03,0xff);
+            out8(0x03,0xff);
+            out8(0x0a,1);
+            sound_command(0x41);
+            sound_command(22050 >> 8);
+            sound_command(22050 & 255);
+            sound_command(0xd1);
+            sound_command(0xc6);
+            sound_command(0);
+            sound_command(0xff);
+            sound_command(0x7f);
+            SOUND_ACTIVE = true;
+            serial("TANEBI95_AUDIO_PLAY\n");
+        }
+    }
+    if SOUND_ACTIVE {
+        out8(0x0c,0);
+        let low:u64 = in8(0x03);
+        let high:u64 = in8(0x03);
+        let half:u64 = (65535 - (low | (high << 8))) / 32768;
+        if half != SOUND_HALF {
+            sound_fill(SOUND_HALF);
+            SOUND_HALF = half;
+        }
+        in8(0x22e);
+    }
+}

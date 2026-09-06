@@ -16,7 +16,7 @@ $go=(Get-Command go -ErrorAction SilentlyContinue).Source
 if(-not $go){$go=Join-Path $env:USERPROFILE 'sdk\go1.27.1\bin\go.exe'}
 Push-Location $root
 try {
-    & $go run ./tools/mkmedia "$out\player.rgb565" "$out\player.u8" 640 360 15 "$out\player.tmv"
+    & $go run ./tools/mkmedia "$out\player.rgb565" "$out\player.u8" 640 360 15 "$out\player-native.tmv"
     if($LASTEXITCODE -ne 0){throw 'Media packing failed'}
 } finally {Pop-Location}
-Write-Host 'Local clip prepared. Run scripts/build.ps1 to embed it in the OS.'
+Write-Host 'TNV3 local clip prepared (native TANEBI raw/RLE/LZ decoder). Run scripts/build.ps1 to embed it in the OS.'

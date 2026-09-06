@@ -1,0 +1,381 @@
+# ネイティブ動画プレイヤー。状態・TNV3復号・拡大・二重バッファをTANEBIで実装。
+# MEDIAは画像とPCMだけを含む。フレームごとの独立圧縮で任意位置に移動できる。
+embed MEDIA;
+buffer MEDIA_DECODE[640 * 360 * 2];
+buffer MEDIA_COLORS[65536 * 4];
+buffer MEDIA_COLUMNS[1920 * 8];
+buffer PLAYER_BACK[1920 * 1200 * 4];
+
+global PLAYER_OPEN:bool = false;
+global PLAYER_PLAYING:bool = false;
+global PLAYER_MUTED:bool = true;
+global PLAYER_POSITION:u64 = 0;
+global PLAYER_REVISION:u64 = 0;
+global PLAYER_EPOCH:u64 = 0;
+global PLAYER_START:u64 = 0;
+global PLAYER_X:u64 = 0;
+global PLAYER_Y:u64 = 0;
+global PLAYER_W:u64 = 0;
+global PLAYER_H:u64 = 0;
+global MEDIA_VALID:bool = false;
+global MEDIA_WIDTH:u64 = 0;
+global MEDIA_HEIGHT:u64 = 0;
+global MEDIA_FPS:u64 = 15;
+global MEDIA_FRAMES:u64 = 0;
+global MEDIA_FRAME_BASE:u64 = 0;
+global MEDIA_AUDIO_BASE:u64 = 0;
+global MEDIA_AUDIO_LENGTH:u64 = 0;
+global MEDIA_SOURCE_START:u64 = 0;
+global MEDIA_DECODED:u64 = 0xffffffffffffffff;
+global MEDIA_SCALE_WIDTH:u64 = 0;
+
+fn player_geometry() {
+    PLAYER_W = ui_min(1000,ui_sub(FB_WIDTH,80));
+    PLAYER_H = (PLAYER_W - 32) * 9 / 16 + 112;
+    PLAYER_X = (FB_WIDTH - PLAYER_W) / 2;
+    PLAYER_Y = ui_sub(FB_HEIGHT,PLAYER_H + 42) / 2;
+}
+
+fn player_media_init() {
+    MEDIA_VALID = false;
+    if len(MEDIA) < 36 { return; }
+    let data:u64 = addr(MEDIA);
+    if load32(data) != 0x33564e54 { return; }
+    MEDIA_WIDTH = load32(data + 4);
+    MEDIA_HEIGHT = load32(data + 8);
+    MEDIA_FPS = load32(data + 12);
+    MEDIA_FRAMES = load32(data + 16);
+    MEDIA_AUDIO_LENGTH = load32(data + 20);
+    MEDIA_SOURCE_START = load32(data + 24);
+    if MEDIA_WIDTH == 0 || MEDIA_WIDTH > 640 || MEDIA_HEIGHT == 0 || MEDIA_HEIGHT > 360 { return; }
+    if MEDIA_FPS == 0 || MEDIA_FPS > 60 || MEDIA_FRAMES == 0 || MEDIA_FRAMES > 3600 { return; }
+    if load32(data + 28) != 22050 { return; }
+    MEDIA_FRAME_BASE = 32 + (MEDIA_FRAMES + 1) * 4;
+    if MEDIA_FRAME_BASE > len(MEDIA) { return; }
+    let total:u64 = load32(data + 32 + MEDIA_FRAMES * 4);
+    if MEDIA_FRAME_BASE + total + MEDIA_AUDIO_LENGTH != len(MEDIA) { return; }
+    if load32(data + 32) != 0 { return; }
+    let n:u64 = 0;
+    let previous:u64 = 0;
+    while n < MEDIA_FRAMES {
+        let next:u64 = load32(data + 36 + n * 4);
+        if next <= previous || next > total { return; }
+        if load8(data + MEDIA_FRAME_BASE + previous) > 2 { return; }
+        previous = next;
+        n = n + 1;
+    }
+    MEDIA_AUDIO_BASE = data + MEDIA_FRAME_BASE + total;
+    MEDIA_VALID = true;
+}
+
+fn player_palette_init() {
+    let color:u64 = 0;
+    while color < 65536 {
+        let red:u64 = ((color >> 11) & 31) * 255 / 31;
+        let green:u64 = ((color >> 5) & 63) * 255 / 63;
+        let blue:u64 = (color & 31) * 255 / 31;
+        let packed:u64 = (red << 16) | (green << 8) | blue;
+        if FB_RGB == 1 { packed = red | (green << 8) | (blue << 16); }
+        store32(addr(MEDIA_COLORS) + color * 4,packed);
+        color = color + 1;
+    }
+}
+
+fn player_init() {
+    player_geometry();
+    player_media_init();
+    player_palette_init();
+    if MEDIA_VALID { serial("TANEBI95_MEDIA_TNV3_READY\n"); }
+}
+
+fn player_anchor() {
+    PLAYER_START = PLAYER_POSITION;
+    PLAYER_EPOCH = ticks();
+    PLAYER_REVISION = PLAYER_REVISION + 1;
+}
+
+fn player_show() {
+    PLAYER_OPEN = true;
+    PLAYER_REVISION = PLAYER_REVISION + 1;
+}
+
+fn player_toggle() {
+    if !MEDIA_VALID { return; }
+    if PLAYER_POSITION + 1 >= MEDIA_FRAMES { PLAYER_POSITION = 0; }
+    PLAYER_PLAYING = !PLAYER_PLAYING;
+    player_anchor();
+}
+
+fn player_close() {
+    PLAYER_OPEN = false;
+    PLAYER_PLAYING = false;
+    player_anchor();
+}
+
+fn player_update() -> bool {
+    if !MEDIA_VALID || !PLAYER_OPEN || !PLAYER_PLAYING || CLOCK_HZ == 0 { return false; }
+    # 商と余りを分け、長時間稼働時のticks*fpsオーバーフローを避ける。
+    let elapsed:u64 = ticks() - PLAYER_EPOCH;
+    let next:u64 = PLAYER_START + (elapsed / CLOCK_HZ) * MEDIA_FPS + (elapsed % CLOCK_HZ) * MEDIA_FPS / CLOCK_HZ;
+    let ended:bool = next >= MEDIA_FRAMES;
+    if ended {
+        PLAYER_PLAYING = false;
+        PLAYER_REVISION = PLAYER_REVISION + 1;
+        next = MEDIA_FRAMES - 1;
+    }
+    let changed:bool = ended || next != PLAYER_POSITION;
+    PLAYER_POSITION = next;
+    return changed;
+}
+
+fn player_sample() -> u64 {
+    if !MEDIA_VALID { return 0; }
+    return PLAYER_POSITION * 22050 / MEDIA_FPS;
+}
+
+fn player_click(px:u64,py:u64) -> bool {
+    if !PLAYER_OPEN { return false; }
+    player_geometry();
+    let x:u64 = PLAYER_X;
+    let y:u64 = PLAYER_Y;
+    let w:u64 = PLAYER_W;
+    let h:u64 = PLAYER_H;
+    if px < x || px >= x + w || py < y || py >= y + h { return false; }
+    if px >= x + w - 28 && px < x + w - 6 && py >= y + 6 && py < y + 28 {
+        player_close();
+        return true;
+    }
+    let controls:u64 = y + h - 40;
+    if py >= controls && py < controls + 28 {
+        if px >= x + 12 && px < x + 106 {
+            player_toggle();
+        } else if px >= x + 114 && px < x + 204 {
+            PLAYER_POSITION = 0;
+            PLAYER_PLAYING = false;
+            player_anchor();
+        } else if px >= x + 212 && px < x + 302 {
+            PLAYER_POSITION = ui_sub(PLAYER_POSITION,5 * MEDIA_FPS);
+            player_anchor();
+        } else if px >= x + 310 && px < x + 400 {
+            PLAYER_POSITION = ui_min(PLAYER_POSITION + 5 * MEDIA_FPS,ui_sub(MEDIA_FRAMES,1));
+            player_anchor();
+        } else if px >= x + 408 && px < x + 514 {
+            PLAYER_MUTED = !PLAYER_MUTED;
+            PLAYER_REVISION = PLAYER_REVISION + 1;
+        } else if px >= x + 530 && px < x + w - 16 {
+            PLAYER_POSITION = ui_min((px - x - 530) * MEDIA_FRAMES / (w - 546),ui_sub(MEDIA_FRAMES,1));
+            player_anchor();
+        }
+    }
+    return true;
+}
+
+fn player_decode() -> bool {
+    if !MEDIA_VALID || PLAYER_POSITION >= MEDIA_FRAMES { return false; }
+    if MEDIA_DECODED == PLAYER_POSITION { return true; }
+    # 途中で失敗した復号結果を以前のフレームとして再利用しない。
+    MEDIA_DECODED = 0xffffffffffffffff;
+    let data:u64 = addr(MEDIA);
+    let input:u64 = data + MEDIA_FRAME_BASE + load32(data + 32 + PLAYER_POSITION * 4);
+    let end:u64 = data + MEDIA_FRAME_BASE + load32(data + 36 + PLAYER_POSITION * 4);
+    let mode:u64 = load8(input);
+    input = input + 1;
+    let output:u64 = addr(MEDIA_DECODE);
+    let size:u64 = MEDIA_WIDTH * MEDIA_HEIGHT * 2;
+    let written:u64 = 0;
+    if mode == 0 {
+        if end - input != size { return false; }
+        copy(output,input,size);
+        written = size;
+    } else if mode == 1 {
+        while input < end {
+            if input + 2 > end { return false; }
+            let tag:u64 = load16(input);
+            input = input + 2;
+            let count:u64 = ((tag & 32767) + 1) * 2;
+            if count > size - written { return false; }
+            if (tag & 32768) != 0 {
+                if input + 2 > end { return false; }
+                let color:u64 = load16(input);
+                input = input + 2;
+                let n:u64 = 0;
+                while n < count {
+                    store16(output + written + n,color);
+                    n = n + 2;
+                }
+            } else {
+                if count > end - input { return false; }
+                copy(output + written,input,count);
+                input = input + count;
+            }
+            written = written + count;
+        }
+    } else if mode == 2 {
+        # トークン上位4bitはリテラル長、下位4bitは一致長-4。
+        # 一致距離はlittle-endian 16bit。15以上の長さは255継続バイト。
+        while input < end {
+            let token:u64 = load8(input);
+            input = input + 1;
+            let literal:u64 = token >> 4;
+            if literal == 15 {
+                let extra:u64 = 255;
+                while extra == 255 {
+                    if input >= end { return false; }
+                    extra = load8(input);
+                    input = input + 1;
+                    literal = literal + extra;
+                    if literal > size { return false; }
+                }
+            }
+            if literal > end - input || literal > size - written { return false; }
+            copy(output + written,input,literal);
+            input = input + literal;
+            written = written + literal;
+            if input == end { break; }
+            if input + 2 > end { return false; }
+            let distance:u64 = load16(input);
+            input = input + 2;
+            if distance == 0 || distance > written { return false; }
+            let count:u64 = token & 15;
+            if count == 15 {
+                let extra:u64 = 255;
+                while extra == 255 {
+                    if input >= end { return false; }
+                    extra = load8(input);
+                    input = input + 1;
+                    count = count + extra;
+                    if count > size { return false; }
+                }
+            }
+            count = count + 4;
+            if count > size - written { return false; }
+            # 既に復号した範囲を倍々にコピーする。各copyの領域は重ならない。
+            let produced:u64 = 0;
+            while produced < count {
+                let chunk:u64 = ui_min(count - produced,distance + produced);
+                copy(output + written + produced,output + written - distance,chunk);
+                produced = produced + chunk;
+            }
+            written = written + count;
+        }
+    } else {
+        return false;
+    }
+    if written != size { return false; }
+    MEDIA_DECODED = PLAYER_POSITION;
+    return true;
+}
+
+fn player_blit(vx:u64,vy:u64,vw:u64,vh:u64) {
+    if MEDIA_SCALE_WIDTH != vw {
+        let column:u64 = 0;
+        while column < vw {
+            store64(addr(MEDIA_COLUMNS) + column * 8,column * MEDIA_WIDTH / vw * 2);
+            column = column + 1;
+        }
+        MEDIA_SCALE_WIDTH = vw;
+    }
+    let row:u64 = 0;
+    let previous:u64 = 0xffffffffffffffff;
+    while row < vh && vy + row < DRAW_HEIGHT {
+        let source_row:u64 = row * MEDIA_HEIGHT / vh;
+        let dest_offset:u64 = ((vy + row) * DRAW_STRIDE + vx) * 4;
+        if dest_offset + vw * 4 > DRAW_SIZE { return; }
+        let dest:u64 = DRAW_BASE + dest_offset;
+        if source_row == previous {
+            copy(dest,dest - DRAW_STRIDE * 4,vw * 4);
+        } else {
+            let source:u64 = addr(MEDIA_DECODE) + source_row * MEDIA_WIDTH * 2;
+            let column:u64 = 0;
+            while column < vw {
+                let color:u64 = load16(source + load64(addr(MEDIA_COLUMNS) + column * 8));
+                store32(dest + column * 4,load32(addr(MEDIA_COLORS) + color * 4));
+                column = column + 1;
+            }
+        }
+        previous = source_row;
+        row = row + 1;
+    }
+}
+
+fn player_button(offset:u64,width:u64,label:str) {
+    let x:u64 = PLAYER_X + offset;
+    let y:u64 = PLAYER_Y + PLAYER_H - 40;
+    fill_rect(x,y,width,28,SILVER);
+    bevel(x,y,width,28,true);
+    text(x + 12,y + 10,label,BLACK,1);
+}
+
+fn player_draw() {
+    if !PLAYER_OPEN { return; }
+    player_geometry();
+    let x:u64 = PLAYER_X;
+    let y:u64 = PLAYER_Y;
+    let w:u64 = PLAYER_W;
+    let h:u64 = PLAYER_H;
+    fill_rect(x,y,w,h,SILVER);
+    bevel(x,y,w,h,true);
+    fill_rect(x + 4,y + 4,w - 8,26,NAVY);
+    text(x + 14,y + 12,"TANEBI MEDIA PLAYER - NATIVE",WHITE,1);
+    fill_rect(x + w - 28,y + 6,22,22,SILVER);
+    bevel(x + w - 28,y + 6,22,22,true);
+    text(x + w - 21,y + 13,"X",BLACK,1);
+    text(x + 16,y + 38,"DUNGEON CRAWL | OFFLINE VIDEO",BLACK,1);
+    let vx:u64 = x + 16;
+    let vy:u64 = y + 54;
+    let vw:u64 = w - 32;
+    let vh:u64 = vw * 9 / 16;
+    fill_rect(vx,vy,vw,vh,BLACK);
+    if MEDIA_VALID {
+        if player_decode() {
+            player_blit(vx,vy,vw,vh);
+        } else {
+            text(vx + 20,vy + 30,"MEDIA DECODE ERROR",WHITE,2);
+        }
+    } else {
+        text(vx + 20,vy + 30,"NO MEDIA - RUN PREPARE-MEDIA.PS1",WHITE,2);
+    }
+    if PLAYER_PLAYING { player_button(12,94,"PAUSE"); } else { player_button(12,94,"PLAY"); }
+    player_button(114,90,"STOP");
+    player_button(212,90,"-5 SEC");
+    player_button(310,90,"+5 SEC");
+    if PLAYER_MUTED { player_button(408,106,"UNMUTE"); } else { player_button(408,106,"MUTE"); }
+    let track:u64 = w - 546;
+    let cy:u64 = y + h - 40;
+    fill_rect(x + 530,cy + 8,track,12,DARK);
+    fill_rect(x + 530,cy + 8,track * PLAYER_POSITION / ui_max(MEDIA_FRAMES,1),12,TEAL);
+    let seconds:u64 = MEDIA_SOURCE_START + PLAYER_POSITION / ui_max(MEDIA_FPS,1);
+    text_number(x + w - 80,y + 38,(seconds / 600) % 10,NAVY,1);
+    text_number(x + w - 74,y + 38,(seconds / 60) % 10,NAVY,1);
+    text(x + w - 68,y + 38,":",NAVY,1);
+    text_number(x + w - 62,y + 38,(seconds / 10) % 6,NAVY,1);
+    text_number(x + w - 56,y + 38,seconds % 10,NAVY,1);
+}
+
+fn player_draw_live() {
+    if !PLAYER_OPEN || DRAW_WIDTH * DRAW_HEIGHT * 4 > len(PLAYER_BACK) { return; }
+    let base:u64 = DRAW_BASE;
+    let size:u64 = DRAW_SIZE;
+    let stride:u64 = DRAW_STRIDE;
+    DRAW_BASE = addr(PLAYER_BACK);
+    DRAW_SIZE = DRAW_WIDTH * DRAW_HEIGHT * 4;
+    DRAW_STRIDE = DRAW_WIDTH;
+    # 復号・拡大中は画面のカーソルを消さない。
+    player_draw();
+    DRAW_BASE = base;
+    DRAW_SIZE = size;
+    DRAW_STRIDE = stride;
+    toggle_cursor();
+    let row:u64 = PLAYER_Y;
+    let bytes:u64 = ui_min(PLAYER_W,DRAW_WIDTH - PLAYER_X) * 4;
+    while row < PLAYER_Y + PLAYER_H && row < DRAW_HEIGHT {
+        let dest:u64 = (row * DRAW_STRIDE + PLAYER_X) * 4;
+        if dest + bytes <= DRAW_SIZE {
+            copy(DRAW_BASE + dest,addr(PLAYER_BACK) + (row * DRAW_WIDTH + PLAYER_X) * 4,bytes);
+        }
+        row = row + 1;
+    }
+    if START_OPEN { draw_start_menu(); }
+    if POWER_OPEN { draw_power(); }
+    toggle_cursor();
+}
