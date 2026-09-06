@@ -1,0 +1,78 @@
+# x86-64 UEFI ABI。テーブルのオフセットは UEFI 仕様の 64-bit 配置。
+# 呼び出し規約とCPU命令だけをコンパイラー組み込みに委ねる。
+global EFI_IMAGE: u64 = 0;
+global EFI_SYSTEM: u64 = 0;
+global EFI_BOOT: u64 = 0;
+buffer EFI_GUID[16];
+buffer EFI_RESULT[8];
+
+fn serial_init() {
+    out8(0x3f9, 0); out8(0x3fb, 0x80);
+    out8(0x3f8, 3); out8(0x3f9, 0);
+    out8(0x3fb, 3); out8(0x3fa, 0xc7); out8(0x3fc, 0x0b);
+}
+
+fn serial(value: str) {
+    let i: u64 = 0;
+    while i < len(value) {
+        let tries: u64 = 0;
+        while (in8(0x3fd) & 0x20) == 0 && tries < 100000 {
+            tries = tries + 1;
+        }
+        out8(0x3f8, byte(value, i));
+        i = i + 1;
+    }
+}
+
+fn efi_init(image: u64, system: u64) {
+    EFI_IMAGE = image;
+    EFI_SYSTEM = system;
+    EFI_BOOT = load64(system + 96);
+    serial_init();
+    # Watchdog を停止。以降の初期化に5分の制約を持ち込まない。
+    call4(load64(EFI_BOOT + 256), 0, 0, 0, 0);
+}
+
+fn efi_guid(a: u64, b: u64, c: u64, tail: u64) {
+    store32(addr(EFI_GUID), a);
+    store16(addr(EFI_GUID) + 4, b);
+    store16(addr(EFI_GUID) + 6, c);
+    store64(addr(EFI_GUID) + 8, tail);
+}
+
+fn efi_handle_protocol(handle: u64) -> u64 {
+    store64(addr(EFI_RESULT), 0);
+    let status: u64 = call3(load64(EFI_BOOT + 152), handle, addr(EFI_GUID), addr(EFI_RESULT));
+    if status != 0 { return 0; }
+    return load64(addr(EFI_RESULT));
+}
+
+fn efi_locate_protocol() -> u64 {
+    store64(addr(EFI_RESULT), 0);
+    let status: u64 = call3(load64(EFI_BOOT + 320), addr(EFI_GUID), 0, addr(EFI_RESULT));
+    if status != 0 { return 0; }
+    return load64(addr(EFI_RESULT));
+}
+
+fn cmos_read(index: u64) -> u64 {
+    out8(0x70, 0x80 | index);
+    let value: u64 = in8(0x71);
+    out8(0x70, index);
+    return value;
+}
+
+fn cmos_write(index: u64, value: u64) {
+    out8(0x70, 0x80 | index);
+    out8(0x71, value);
+    out8(0x70, index);
+}
+
+fn reboot_doom() {
+    serial("TANEBI95_DOOM_REQUESTED\n");
+    cmos_write(0x38, 0xd5);
+    out8(0xcf9, 0x06);
+    let tries: u64 = 0;
+    while tries < 100000 { pause(); tries = tries + 1; }
+    out8(0x64, 0xfe);
+    while true { pause(); }
+}

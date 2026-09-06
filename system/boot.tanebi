@@ -1,0 +1,59 @@
+# UEFIブートマネージャー。デスクトップと既存UEFI DOOMの起動先を選ぶ。
+buffer DEVICE_PATH[2048];
+buffer CHILD_IMAGE[8];
+
+fn launch_file(path: str) -> u64 {
+    # EFI_LOADED_IMAGE_PROTOCOL
+    efi_guid(0x5b1b31a1, 0x9562, 0x11d2, 0x3b7269c9a0003f8e);
+    let loaded: u64 = efi_handle_protocol(EFI_IMAGE);
+    if loaded == 0 { return 0x800000000000000e; }
+    let device: u64 = load64(loaded + 24);
+    # EFI_DEVICE_PATH_PROTOCOL
+    efi_guid(0x09576e91, 0x6d3f, 0x11d2, 0x3b7269c9a000398e);
+    let source: u64 = efi_handle_protocol(device);
+    if source == 0 { return 0x800000000000000e; }
+    let p: u64 = 0;
+    while p + 4 < 1024 {
+        if load8(source + p) == 0x7f { break; }
+        let size: u64 = load16(source + p + 2);
+        if size < 4 || p + size > 1024 { return 0x8000000000000002; }
+        copy(addr(DEVICE_PATH) + p, source + p, size);
+        p = p + size;
+    }
+    if p + 4 >= 1024 { return 0x8000000000000002; }
+    let size: u64 = 4 + (len(path) + 1) * 2;
+    if p + size + 4 > len(DEVICE_PATH) { return 0x8000000000000002; }
+    store8(addr(DEVICE_PATH) + p, 4);
+    store8(addr(DEVICE_PATH) + p + 1, 4);
+    store16(addr(DEVICE_PATH) + p + 2, size);
+    let i: u64 = 0;
+    while i < len(path) {
+        store16(addr(DEVICE_PATH) + p + 4 + i * 2, byte(path, i));
+        i = i + 1;
+    }
+    store16(addr(DEVICE_PATH) + p + 4 + len(path) * 2, 0);
+    p = p + size;
+    store8(addr(DEVICE_PATH) + p, 0x7f);
+    store8(addr(DEVICE_PATH) + p + 1, 0xff);
+    store16(addr(DEVICE_PATH) + p + 2, 4);
+    store64(addr(CHILD_IMAGE), 0);
+    let status: u64 = call6(load64(EFI_BOOT + 200), 0, EFI_IMAGE, addr(DEVICE_PATH), 0, 0, addr(CHILD_IMAGE));
+    if status != 0 { return status; }
+    return call3(load64(EFI_BOOT + 208), load64(addr(CHILD_IMAGE)), 0, 0);
+}
+
+fn entry(image: u64, system: u64) -> u64 {
+    efi_init(image, system);
+    serial("TANEBI95_TANEBI_BOOT_MANAGER\n");
+    let path: str = "\\KERNEL.EFI";
+    if cmos_read(0x38) == 0xd5 {
+        cmos_write(0x38, 0);
+        serial("TANEBI95_BOOT_DOOM\n");
+        path = "\\SHELL.EFI";
+    } else {
+        serial("TANEBI95_BOOT_DESKTOP\n");
+    }
+    let status: u64 = launch_file(path);
+    if status != 0 { serial("TANEBI95_BOOT_FAILURE\n"); }
+    return status;
+}
