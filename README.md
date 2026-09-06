@@ -2,106 +2,106 @@
 
 > A spark becomes a world.
 
-브라우저가 아닌 x86-64 UEFI 환경에서 직접 부팅되는 [TANEBI](https://github.com/miroqaan/tanebi-lang) 기반 운영체제 프로젝트다. Rust `no_std` 커널은 GOP에서 프레임버퍼 주소를 받은 뒤 `ExitBootServices`로 펌웨어 부팅 서비스를 종료하고 1990년대풍 데스크톱을 직접 그린다.
+[TANEBI](https://github.com/miroqaan/tanebi-lang) を使い、ブラウザーではなく x86-64 UEFI 環境で直接起動する自作 OS プロジェクトです。Rust の `no_std` カーネルが GOP からフレームバッファーのアドレスを取得し、`ExitBootServices` でファームウェアのブートサービスを終了した後、1990 年代風のデスクトップを直接描画します。
 
-![TANEBI 95 native desktop](docs/tanebi95-native.png)
+![TANEBI 95 のネイティブデスクトップ](docs/tanebi95-native.png)
 
-## 특징
+## 特徴
 
-- 64MiB FAT16 x86-64 UEFI 부팅 이미지
-- `ExitBootServices` 이후 bare-metal 실행
-- GOP 프레임버퍼 직접 렌더링
-- PS/2 I/O 포트 기반 키보드·마우스 입력과 소프트웨어 커서
-- TANEBI 스크립트로 생성하는 결정론적 부팅 매니페스트
-- TANEBI Studio, 시작 메뉴, 전원 화면
-- DOOM ARENA: 재부팅을 통해 UEFI DOOM과 Freedoom Phase 2 실행
+- 64 MiB の FAT16 x86-64 UEFI 起動イメージ
+- `ExitBootServices` 後のベアメタル実行
+- GOP フレームバッファーへの直接描画
+- PS/2 I/O ポート経由のキーボード・マウス入力とソフトウェアカーソル
+- TANEBI スクリプトから生成する決定論的な起動マニフェスト
+- TANEBI Studio、スタートメニュー、電源画面
+- DOOM ARENA：再起動して UEFI DOOM と Freedoom Phase 2 を実行
 
-## 빌드
+## ビルド
 
 ```powershell
 .\scripts\build.ps1
 ```
 
-산출물:
+生成されるファイル：
 
 - `build/esp/EFI/BOOT/BOOTX64.EFI`
-- `build/tanebi95.img` — 64MiB FAT16 UEFI 부팅 이미지
+- `build/tanebi95.img` — 64 MiB の FAT16 UEFI 起動イメージ
 
-## 실행
+## 起動と操作
 
-QEMU와 x86-64 EDK2 펌웨어가 필요하다.
+QEMU と x86-64 EDK2 ファームウェアが必要です。
 
 ```powershell
 .\scripts\run.ps1
 ```
 
-키보드:
+キーボード：
 
-- `S`: 시작 메뉴
-- `T`: TANEBI Studio 창 열기/닫기
-- `Esc`: 전원 화면
-- `D`: DOOM ARENA로 재부팅
-- `V`: 네이티브 미디어 플레이어 열기 (`Space`: 재생/일시정지)
+- `S`：スタートメニュー
+- `T`：TANEBI Studio ウィンドウを開く／閉じる
+- `Esc`：電源画面
+- `D`：DOOM ARENA に再起動
+- `V`：ネイティブメディアプレーヤーを開く（`Space`：再生／一時停止）
 
-DOOM에서는 방향키로 이동·회전, `Space`로 사격, `E`로 문을 연다.
-게임 오디오는 현재 비활성화돼 있다.
-DOOM은 기본 1280×800 모드에서 원본 320×200을 4배 정수 확대해 전체 화면으로 표시한다.
-해당 모드가 없으면 현재 화면에 맞는 최대 정수 배율을 사용한다. 게임 시야는 상태 표시줄을 남긴 최대 크기가 기본이다.
+DOOM では方向キーで移動・旋回し、`Space` で射撃、`E` でドアを開きます。
+ゲーム音声は現在無効です。
+標準の 1280×800 モードでは、元の 320×200 画面を整数倍の 4 倍に拡大して全画面に表示します。
+このモードが使えない場合は、現在の画面に収まる最大の整数倍率を使用します。ゲームの表示領域は、ステータスバーを残した最大サイズが既定です。
 
-마우스:
+マウス：
 
-- 바탕화면의 `TANEBI STUDIO` 아이콘 클릭
-- `START` 버튼과 시작 메뉴 항목 클릭
-- Studio 창의 닫기 버튼 클릭
+- デスクトップの `TANEBI STUDIO` アイコンをクリック
+- `START` ボタンとスタートメニューの項目をクリック
+- Studio ウィンドウの閉じるボタンをクリック
 
-현재 입력은 PS/2 상대 좌표 방식이다. QEMU 화면을 클릭해 마우스를 캡처한 뒤 게스트 내부 포인터를 기준으로 조작한다.
-빠른 이동도 패킷 헤더의 9비트 부호를 사용해 처리하며, 오버플로가 표시된 축은 무시한다.
-최소화한 창에서 백그라운드 실행하려면 `scripts/run.ps1 -SkipBuild -Background -MonitorPort 45454`를 사용한다. `HeadlessTest`만 화면 없이 실행한다.
+現在の入力は PS/2 の相対座標方式です。QEMU 画面をクリックしてマウスをキャプチャーした後、ゲスト内のポインターを基準に操作します。
+高速な移動も、パケットヘッダーの符号ビットを含む 9 ビット値として処理し、オーバーフローが示された軸は無視します。
+ウィンドウを最小化してバックグラウンドで実行するには、`scripts/run.ps1 -SkipBuild -Background -MonitorPort 45454` を使います。画面を表示しないのは `HeadlessTest` のみです。
 
-## 현재 경계
+## 現在の実装範囲
 
-DOOM은 커널 내부 프로세스가 아니다. 데스크톱이 CMOS 부팅 선택 값을 기록하고 재부팅하면 부트 매니저가 EDK II Shell과 UEFI DOOM을 실행한다. 데스크톱과 게임 모두 QEMU 가상 머신 안에서 실행된다. 게임을 종료한 뒤 QEMU를 재시작하면 데스크톱으로 돌아온다.
+DOOM はカーネル内のプロセスではありません。デスクトップが CMOS に起動先の選択値を書き込んで再起動すると、ブートマネージャーが EDK II Shell と UEFI DOOM を実行します。デスクトップもゲームも QEMU 仮想マシン内で動作します。ゲームを終了し、QEMU を起動し直すとデスクトップに戻ります。
 
-네이티브 버전의 Studio는 빌드 시 생성된 TANEBI 결과를 표시한다. 미디어 플레이어는 빌드에 내장한 로컬 클립을 재생한다. 인터넷/YouTube 직접 스트리밍과 일반 MP4 파일 열기는 아직 지원하지 않는다.
+ネイティブ版の Studio は、ビルド時に生成した TANEBI の実行結果を表示します。メディアプレーヤーは、ビルドに組み込んだローカル動画を再生します。インターネットや YouTube からの直接ストリーミング、一般的な MP4 ファイルの読み込みは、まだサポートしていません。
 
-### 네이티브 미디어 플레이어
+### ネイティブメディアプレーヤー
 
-데스크톱 `MEDIA PLAYER` 또는 시작 메뉴에서 연다. 재생/일시정지, 정지, ±5초 이동, 탐색 바, 음소거/해제를 지원한다. 초기 상태는 음소거다. 일반 QEMU 실행에서는 `UNMUTE`로 소리를 켜며, 최소화 테스트에서는 스피커로 출력하지 않는다.
+デスクトップの `MEDIA PLAYER` またはスタートメニューから開きます。再生／一時停止、停止、5 秒戻る／進む、シークバー、ミュート切り替えに対応しています。初期状態はミュートです。通常の QEMU 実行では `UNMUTE` で音声を有効にし、最小化して行うテストではスピーカーに出力しません。
 
-영상은 640×360 RGB565, 15fps 프레임별 DEFLATE로 저장하고 커널이 직접 압축을 풀어 그린다. 음성은 22,050Hz unsigned 8-bit mono PCM을 SB16/ISA DMA 이중 버퍼로 출력한다. 펌웨어 서비스 종료 이후에도 재생되며 브라우저나 호스트 플레이어를 이용하지 않는다.
+映像は 640×360、RGB565、15 fps でフレームごとに DEFLATE 圧縮して保存し、カーネルが直接展開・描画します。音声は 22,050 Hz の符号なし 8 ビット・モノラル PCM を、SB16/ISA DMA のダブルバッファーで出力します。ファームウェアのブートサービス終了後も再生でき、ブラウザーやホスト側のプレーヤーは使用しません。
 
-요청한 `https://www.youtube.com/watch?v=low-pfQAI0A&t=974s`의 16:14–16:44 구간은 로컬 빌드에만 내장했다. 제3자 영상/음원 및 이를 내장한 커널 이미지는 이 공개 저장소에 커밋하지 않는다. 새 체크아웃에서는 클립을 준비하지 않으면 `NO MEDIA`로 표시한다.
+[指定の動画](https://www.youtube.com/watch?v=low-pfQAI0A&t=974s) の 16:14–16:44 の区間は、ローカルビルドにのみ組み込んでいます。第三者の映像・音源、およびそれらを組み込んだカーネルイメージは、この公開リポジトリにはコミットしません。新しくチェックアウトした環境では、動画を用意するまで `NO MEDIA` と表示されます。
 
 ```powershell
-# 해당 30초 클립 파일을 로컬에 준비한 경우
+# 該当する 30 秒の動画ファイルをローカルに用意した場合
 .\scripts\prepare-media.ps1 -SourceVideo .\build\player-source.mp4
 .\scripts\build.ps1
-# 스피커 출력 없이 PCM 결과를 파일로 검증
+# スピーカーに出力せず、PCM 出力をファイルで検証
 .\scripts\run.ps1 -SkipBuild -Background -AudioLog build\media-audio.wav
 ```
 
-`scripts/capture-desktop-clean.ps1 -Media`는 최소화된 별도 VM에서 내부 프레임버퍼만 촬영한다. `scripts/render-native-fullframe.ps1 -Media`는 실제 클릭 표시와 일본어 해설을 포함한 2560×1600 소개영상을 만든다.
+`scripts/capture-desktop-clean.ps1 -Media` は、最小化した別の VM で内部フレームバッファーのみを撮影します。`scripts/render-native-fullframe.ps1 -Media` は、実際のクリック位置の表示と日本語解説を含む 2560×1600 の紹介動画を作成します。
 
-이 버전은 실제로 UEFI에서 부팅한 뒤 펌웨어 부팅 서비스를 종료하는 bare-metal Stage 1이다. 이후 화면은 프레임버퍼 메모리에 직접 쓰고 키보드는 PS/2 I/O 포트에서 scan code를 읽는다.
+このバージョンは、実際に UEFI から起動してファームウェアのブートサービスを終了するベアメタル Stage 1 です。その後はフレームバッファーメモリーへ直接描画し、キーボードのスキャンコードを PS/2 I/O ポートから読み取ります。
 
-빌드 시 공개 모듈 `github.com/miroqaan/tanebi-lang/cmd/tanebi@v0.1.0`이 `system.tanebi`를 실행하고 결정론적 결과를 커널에 포함한다. TANEBI 자체를 Ring 3 프로세스로 실행하는 단계는 페이지 테이블·syscall·프로세스 로더 이후 로드맵이다.
+ビルド時に公開モジュール `github.com/miroqaan/tanebi-lang/cmd/tanebi@v0.1.0` が `system.tanebi` を実行し、その決定論的な結果をカーネルに組み込みます。TANEBI 自体を Ring 3 プロセスとして実行する機能は、ページテーブル・システムコール・プロセスローダーの実装後に取り組む予定です。
 
-## 검증
+## 検証
 
 ```powershell
 .\scripts\test.ps1
 ```
 
-테스트는 PS/2 이동 값 262,144개 조합과 오버플로 처리, TANEBI 매니페스트, UEFI PE, FAT16 구조를 검사하고 QEMU에서 `ExitBootServices` 이후 bare-metal marker까지 확인한다.
+テストでは、PS/2 の移動値 262,144 通りとオーバーフロー処理、TANEBI マニフェスト、UEFI PE、FAT16 構造を検査し、QEMU 上で `ExitBootServices` 後のベアメタル動作を示すマーカーまで確認します。
 
-## 프로젝트 구조
+## プロジェクト構成
 
 ```text
-kernel/          Rust no_std UEFI kernel and framebuffer desktop
-scripts/         build, QEMU run, and native boot test
-tools/mkfat16/   deterministic FAT16 image builder
-system.tanebi    TANEBI boot program
-docs/            verified native screenshot
+kernel/          Rust no_std UEFI カーネルとフレームバッファーデスクトップ
+scripts/         ビルド、QEMU 起動、ネイティブ起動テスト
+tools/mkfat16/   決定論的な FAT16 イメージビルダー
+system.tanebi    TANEBI 起動プログラム
+docs/            検証済みのネイティブ画面キャプチャー
 ```
 
-Microsoft Windows 95, 호환 레이어 또는 에뮬레이터가 아니며 Microsoft의 코드·상표 이미지·에셋을 포함하지 않는 독자적인 데스크톱이다.
+本プロジェクトは独自のデスクトップであり、Microsoft Windows 95、その互換レイヤー、またはそのエミュレーターではありません。Microsoft のコード、商標画像、アセットは含みません。

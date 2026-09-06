@@ -1,13 +1,13 @@
-# This TANEBI program is executed during the native OS build.
-let 불꽃 = 3
-let 이름 = "TANEBI 95"
+# ネイティブ OS のビルド時に実行する TANEBI プログラム。
+let 種火 = 3
+let 名前 = "TANEBI 95"
 
-print "SYSTEM=" + 이름
+print "SYSTEM=" + 名前
 print "MOTTO=A SPARK BECOMES A WORLD"
 print "COMPUTER=MY COMPUTER"
 print "DOCUMENTS=DOCUMENTS"
 
-if 불꽃 == 3 {
+if 種火 == 3 {
     print "STATUS=TANEBI BOOT SCRIPT OK"
 } else {
     print "STATUS=BOOT SCRIPT ERROR"
