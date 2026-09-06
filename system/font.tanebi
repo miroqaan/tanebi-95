@@ -1,0 +1,119 @@
+# 5×7 フォント。各文字の7行を5ビットずつ格納する。
+# グリフの選択・拡大描画もTANEBI自身で実行する。
+const FONT_WIDTH:u64 = 5;
+const FONT_HEIGHT:u64 = 7;
+
+fn glyph(code:u64) -> u64 {
+    let ch:u64 = code;
+    if ch >= 97 && ch <= 122 { ch = ch - 32; }
+    if ch == 65 { return 0x4631fc62e; }
+    if ch == 66 { return 0x7a31f463e; }
+    if ch == 67 { return 0x3a308422e; }
+    if ch == 68 { return 0x7a318c63e; }
+    if ch == 69 { return 0x7e10f421f; }
+    if ch == 70 { return 0x4210f421f; }
+    if ch == 71 { return 0x3e31bc22e; }
+    if ch == 72 { return 0x4631fc631; }
+    if ch == 73 { return 0x7c842109f; }
+    if ch == 74 { return 0x325210847; }
+    if ch == 75 { return 0x4654c5251; }
+    if ch == 76 { return 0x7e1084210; }
+    if ch == 77 { return 0x4631ad771; }
+    if ch == 78 { return 0x46319d731; }
+    if ch == 79 { return 0x3a318c62e; }
+    if ch == 80 { return 0x4210f463e; }
+    if ch == 81 { return 0x36558c62e; }
+    if ch == 82 { return 0x4654f463e; }
+    if ch == 83 { return 0x78217420f; }
+    if ch == 84 { return 0x10842109f; }
+    if ch == 85 { return 0x3a318c631; }
+    if ch == 86 { return 0x11518c631; }
+    if ch == 87 { return 0x2ab5ac631; }
+    if ch == 88 { return 0x462a22a31; }
+    if ch == 89 { return 0x108422a31; }
+    if ch == 90 { return 0x7e082083f; }
+    if ch == 48 { return 0x3a39ace2e; }
+    if ch == 49 { return 0x388421184; }
+    if ch == 50 { return 0x7d041062e; }
+    if ch == 51 { return 0x78217043e; }
+    if ch == 52 { return 0x85f928c2; }
+    if ch == 53 { return 0x7821f421f; }
+    if ch == 54 { return 0x3a31f420e; }
+    if ch == 55 { return 0x21082083f; }
+    if ch == 56 { return 0x3a317462e; }
+    if ch == 57 { return 0x38217c62e; }
+    if ch == 33 { return 0x100421084; }
+    if ch == 34 { return 0x14a; }
+    if ch == 35 { return 0x15f52bea; }
+    if ch == 40 { return 0x88842082; }
+    if ch == 41 { return 0x208210888; }
+    if ch == 43 { return 0x84f9080; }
+    if ch == 44 { return 0x208000000; }
+    if ch == 45 { return 0xf8000; }
+    if ch == 46 { return 0x100000000; }
+    if ch == 47 { return 0x420820821; }
+    if ch == 58 { return 0x400080; }
+    if ch == 59 { return 0x208400080; }
+    if ch == 60 { return 0x88882082; }
+    if ch == 62 { return 0x208208888; }
+    if ch == 61 { return 0xf83e0; }
+    if ch == 91 { return 0x39084210e; }
+    if ch == 93 { return 0x38421084e; }
+    if ch == 123 { return 0xc8441083; }
+    if ch == 125 { return 0x608411098; }
+    if ch == 95 { return 0x7c0000000; }
+    if ch == 32 { return 0x0; }
+    return 0x802083f;
+}
+
+fn text(x:u64,y:u64,value:str,color:u64,scale:u64) {
+    let cursor:u64 = x;
+    let index:u64 = 0;
+    while index < len(value) {
+        let ch:u64 = byte(value,index);
+        if ch == 10 {
+            cursor = x;
+        } else {
+            let bits:u64 = glyph(ch);
+            let row:u64 = 0;
+            while row < FONT_HEIGHT {
+                let line:u64 = (bits >> (row * FONT_WIDTH)) & 31;
+                let column:u64 = 0;
+                while column < FONT_WIDTH {
+                    if (line & (1 << (FONT_WIDTH - 1 - column))) != 0 {
+                        fill_rect(cursor + column * scale,y + row * scale,scale,scale,color);
+                    }
+                    column = column + 1;
+                }
+                row = row + 1;
+            }
+            cursor = cursor + (FONT_WIDTH + 1) * scale;
+        }
+        index = index + 1;
+    }
+}
+
+fn text_number(x:u64,y:u64,value:u64,color:u64,scale:u64) {
+    let divisor:u64 = 1;
+    while value / divisor >= 10 && divisor <= 1000000000000000000 {
+        divisor = divisor * 10;
+    }
+    let position:u64 = x;
+    while divisor > 0 {
+        let digit:u64 = (value / divisor) % 10;
+        let bits:u64 = glyph(48 + digit);
+        let row:u64 = 0;
+        while row < FONT_HEIGHT {
+            let column:u64 = 0;
+            while column < FONT_WIDTH {
+                if ((bits >> (row * FONT_WIDTH)) & (1 << (4 - column))) != 0 {
+                    fill_rect(position + column * scale,y + row * scale,scale,scale,color);
+                }
+                column = column + 1;
+            }
+            row = row + 1;
+        }
+        position = position + 6 * scale;
+        divisor = divisor / 10;
+    }
+}

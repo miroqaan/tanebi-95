@@ -1,0 +1,142 @@
+# PS/2入力とソフトウェアカーソル。移動量はヘッダーの符号を含む9ビット。
+# データバイトのbit7を符号と誤認せず、+200や-256も正しく扱う。
+global MOUSE_X:u64 = 0;
+global MOUSE_Y:u64 = 0;
+global MOUSE_HEADER:u64 = 0;
+global MOUSE_BYTE_X:u64 = 0;
+global MOUSE_INDEX:u64 = 0;
+global MOUSE_LEFT_DOWN:bool = false;
+global MOUSE_CLICKED:bool = false;
+global MOUSE_MOVED:bool = false;
+
+fn mouse_motion_magnitude(header:u64,data:u64,sign_mask:u64,overflow_mask:u64) -> u64 {
+    if (header & overflow_mask) != 0 { return 0; }
+    if (header & sign_mask) != 0 { return 256 - data; }
+    return data;
+}
+
+fn mouse_motion_negative(header:u64,sign_mask:u64,overflow_mask:u64) -> bool {
+    return (header & overflow_mask) == 0 && (header & sign_mask) != 0;
+}
+
+fn mouse_apply_axis(position:u64,limit:u64,magnitude:u64,negative:bool) -> u64 {
+    if limit == 0 { return 0; }
+    if negative { return ui_min(ui_sub(position,magnitude),limit - 1); }
+    return ui_min(position + magnitude,limit - 1);
+}
+
+fn mouse_feed(data:u64) -> bool {
+    MOUSE_CLICKED = false;
+    MOUSE_MOVED = false;
+    if MOUSE_INDEX == 0 {
+        if (data & 8) == 0 { return false; }
+        MOUSE_HEADER = data;
+        MOUSE_INDEX = 1;
+        return false;
+    }
+    if MOUSE_INDEX == 1 {
+        MOUSE_BYTE_X = data;
+        MOUSE_INDEX = 2;
+        return false;
+    }
+    MOUSE_INDEX = 0;
+    let old_left:bool = MOUSE_LEFT_DOWN;
+    MOUSE_LEFT_DOWN = (MOUSE_HEADER & 1) != 0;
+    let dx:u64 = mouse_motion_magnitude(MOUSE_HEADER,MOUSE_BYTE_X,0x10,0x40);
+    let dy:u64 = mouse_motion_magnitude(MOUSE_HEADER,data,0x20,0x80);
+    let negative_x:bool = mouse_motion_negative(MOUSE_HEADER,0x10,0x40);
+    let negative_y:bool = mouse_motion_negative(MOUSE_HEADER,0x20,0x80);
+    MOUSE_X = mouse_apply_axis(MOUSE_X,FB_WIDTH,dx,negative_x);
+    MOUSE_Y = mouse_apply_axis(MOUSE_Y,FB_HEIGHT,dy,!negative_y);
+    MOUSE_CLICKED = !old_left && MOUSE_LEFT_DOWN;
+    MOUSE_MOVED = dx != 0 || dy != 0;
+    return true;
+}
+
+fn wait_controller_write() {
+    let attempt:u64 = 0;
+    while attempt < 100000 {
+        if (in8(0x64) & 2) == 0 { return; }
+        pause();
+        attempt = attempt + 1;
+    }
+}
+
+fn wait_controller_read() {
+    let attempt:u64 = 0;
+    while attempt < 100000 {
+        if (in8(0x64) & 1) != 0 { return; }
+        pause();
+        attempt = attempt + 1;
+    }
+}
+
+fn mouse_write(value:u64) {
+    wait_controller_write();
+    out8(0x64,0xd4);
+    wait_controller_write();
+    out8(0x60,value);
+}
+
+fn mouse_read() -> u64 {
+    wait_controller_read();
+    return in8(0x60);
+}
+
+fn mouse_init() {
+    wait_controller_write();
+    out8(0x64,0xa8);
+    wait_controller_write();
+    out8(0x64,0x20);
+    let command:u64 = mouse_read();
+    command = (command | 2) & ~0x20;
+    wait_controller_write();
+    out8(0x64,0x60);
+    wait_controller_write();
+    out8(0x60,command);
+    mouse_write(0xf6);
+    mouse_read();
+    mouse_write(0xf4);
+    mouse_read();
+    serial("TANEBI95_MOUSE_READY\n");
+}
+
+fn cursor_row(row:u64) -> u64 {
+    if row == 0 { return 1; }
+    if row == 1 { return 3; }
+    if row == 2 { return 5; }
+    if row == 3 { return 9; }
+    if row == 4 { return 17; }
+    if row == 5 { return 33; }
+    if row == 6 { return 65; }
+    if row == 7 { return 129; }
+    if row == 8 { return 257; }
+    if row == 9 { return 513; }
+    if row == 10 { return 961; }
+    if row == 11 { return 73; }
+    if row == 12 { return 149; }
+    if row == 13 { return 147; }
+    if row == 14 { return 289; }
+    if row == 15 { return 288; }
+    if row == 16 { return 192; }
+    if row == 17 { return 0; }
+    return 0;
+}
+
+# XORによってカーソルだけを消去・再表示し、移動のたびに全画面を描き直さない。
+fn toggle_cursor_at(x:u64,y:u64) {
+    let row:u64 = 0;
+    while row < 18 {
+        let bits:u64 = cursor_row(row);
+        let column:u64 = 0;
+        while column < 12 {
+            if (bits & (1 << column)) != 0 { xor_pixel(x + column,y + row); }
+            column = column + 1;
+        }
+        row = row + 1;
+    }
+}
+
+fn toggle_cursor() {
+    toggle_cursor_at(MOUSE_X,MOUSE_Y);
+}

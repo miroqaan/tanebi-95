@@ -1,0 +1,446 @@
+# TANEBI 95のデスクトップ。描画・状態遷移・アプリ操作をTANEBIで記述する。
+# Rustはネイティブ出力用のコンパイル先であり、UIロジックの実装元ではない。
+const TEAL:u64 = 0x008080;
+const SILVER:u64 = 0xc0c0c0;
+const WHITE:u64 = 0xffffff;
+const BLACK:u64 = 0x000000;
+const NAVY:u64 = 0x000080;
+const DARK:u64 = 0x404040;
+const GRAY:u64 = 0x808080;
+const YELLOW:u64 = 0xffde40;
+const RED:u64 = 0xc42430;
+
+global DRAW_BASE:u64 = 0;
+global DRAW_SIZE:u64 = 0;
+global DRAW_WIDTH:u64 = 0;
+global DRAW_HEIGHT:u64 = 0;
+global DRAW_STRIDE:u64 = 0;
+global DRAW_RGB:u64 = 0;
+global START_OPEN:bool = false;
+global STUDIO_OPEN:bool = true;
+global POWER_OPEN:bool = false;
+global STUDIO_RESULT:u64 = 0;
+buffer DESKTOP_BUFFER[1920 * 1200 * 4];
+
+fn ui_min(a:u64,b:u64) -> u64 {
+    if a < b { return a; }
+    return b;
+}
+
+fn ui_max(a:u64,b:u64) -> u64 {
+    if a > b { return a; }
+    return b;
+}
+
+fn ui_sub(a:u64,b:u64) -> u64 {
+    if a < b { return 0; }
+    return a - b;
+}
+
+fn draw_to_screen() {
+    DRAW_BASE = FB_BASE;
+    DRAW_SIZE = FB_SIZE;
+    DRAW_WIDTH = FB_WIDTH;
+    DRAW_HEIGHT = FB_HEIGHT;
+    DRAW_STRIDE = FB_STRIDE;
+    DRAW_RGB = FB_RGB;
+}
+
+fn framebuffer_color(color:u64) -> u64 {
+    if DRAW_RGB == 1 {
+        return ((color >> 16) & 255) | (color & 0x00ff00) | ((color & 255) << 16);
+    }
+    return color & 0xffffff;
+}
+
+fn pixel(x:u64,y:u64,color:u64) {
+    if x >= DRAW_WIDTH || y >= DRAW_HEIGHT { return; }
+    let offset:u64 = (y * DRAW_STRIDE + x) * 4;
+    if offset + 3 >= DRAW_SIZE { return; }
+    store32(DRAW_BASE + offset,framebuffer_color(color));
+}
+
+fn fill_rect(x:u64,y:u64,width:u64,height:u64,color:u64) {
+    if x >= DRAW_WIDTH || y >= DRAW_HEIGHT { return; }
+    let x_end:u64 = x + ui_min(width,DRAW_WIDTH - x);
+    let y_end:u64 = y + ui_min(height,DRAW_HEIGHT - y);
+    let packed:u64 = framebuffer_color(color);
+    let row:u64 = y;
+    while row < y_end {
+        let column:u64 = x;
+        let offset:u64 = (row * DRAW_STRIDE + x) * 4;
+        while column < x_end {
+            if offset + 3 < DRAW_SIZE { store32(DRAW_BASE + offset,packed); }
+            offset = offset + 4;
+            column = column + 1;
+        }
+        row = row + 1;
+    }
+}
+
+fn xor_pixel(x:u64,y:u64) {
+    if x >= DRAW_WIDTH || y >= DRAW_HEIGHT { return; }
+    let offset:u64 = (y * DRAW_STRIDE + x) * 4;
+    if offset + 3 >= DRAW_SIZE { return; }
+    let location:u64 = DRAW_BASE + offset;
+    store32(location,load32(location) ^ 0x00ffffff);
+}
+
+fn line_h(x:u64,y:u64,width:u64,color:u64) {
+    fill_rect(x,y,width,1,color);
+}
+
+fn line_v(x:u64,y:u64,height:u64,color:u64) {
+    fill_rect(x,y,1,height,color);
+}
+
+fn bevel(x:u64,y:u64,width:u64,height:u64,raised:bool) {
+    if width < 2 || height < 2 { return; }
+    let light:u64 = DARK;
+    let shadow:u64 = WHITE;
+    if raised { light = WHITE; shadow = DARK; }
+    line_h(x,y,width,light);
+    line_v(x,y,height,light);
+    line_h(x,y + height - 1,width,shadow);
+    line_v(x + width - 1,y,height,shadow);
+    line_h(x + 1,y + height - 2,width - 2,BLACK);
+    line_v(x + width - 2,y + 1,height - 2,BLACK);
+}
+
+fn flame_row(row:u64) -> u64 {
+    if row == 0 || row == 7 { return 4; }
+    if row == 1 { return 12; }
+    if row == 2 || row == 6 { return 14; }
+    if row == 3 { return 30; }
+    return 31;
+}
+
+fn draw_flame(x:u64,y:u64,scale:u64) {
+    let row:u64 = 0;
+    while row < 8 {
+        let bits:u64 = flame_row(row);
+        let color:u64 = RED;
+        if row > 4 { color = YELLOW; }
+        let column:u64 = 0;
+        while column < 5 {
+            if (bits & (1 << (4 - column))) != 0 {
+                fill_rect(x + column * scale,y + row * scale,scale,scale,color);
+            }
+            column = column + 1;
+        }
+        row = row + 1;
+    }
+}
+
+fn draw_computer(x:u64,y:u64) {
+    fill_rect(x,y,38,29,SILVER);
+    bevel(x,y,38,29,true);
+    fill_rect(x + 5,y + 5,28,17,NAVY);
+    fill_rect(x + 12,y + 30,14,4,SILVER);
+    fill_rect(x + 7,y + 34,24,4,SILVER);
+}
+
+fn draw_folder(x:u64,y:u64) {
+    fill_rect(x + 3,y + 7,16,6,YELLOW);
+    fill_rect(x,y + 12,40,26,YELLOW);
+    bevel(x,y + 12,40,26,true);
+}
+
+fn draw_doom_icon(x:u64,y:u64) {
+    fill_rect(x,y + 4,42,34,BLACK);
+    bevel(x,y + 4,42,34,true);
+    draw_flame(x + 12,y + 7,3);
+}
+
+fn draw_desktop_icon(x:u64,y:u64,label:str,folder:bool) {
+    if folder { draw_folder(x + 10,y); } else { draw_computer(x + 10,y); }
+    text(x,y + 45,label,WHITE,1);
+}
+
+fn studio_width() -> u64 {
+    return ui_min(ui_max(FB_WIDTH * 3 / 4,520),ui_sub(FB_WIDTH,80));
+}
+
+fn studio_height() -> u64 {
+    return ui_min(ui_max(FB_HEIGHT * 2 / 3,330),ui_sub(FB_HEIGHT,100));
+}
+
+# Studioの画面に示すコードと同じ関数をOSのネイティブ実行で呼び出す。
+fn studio_demo() -> u64 {
+    let flame:u64 = 3;
+    let count:u64 = 0;
+    while count < flame {
+        count = count + 1;
+    }
+    return count;
+}
+
+fn studio_code_line(row:u64) -> str {
+    if row == 0 { return "# NATIVE TANEBI PROGRAM"; }
+    if row == 1 { return "fn studio_demo() -> u64 {"; }
+    if row == 2 { return "  let flame:u64 = 3;"; }
+    if row == 3 { return "  let count:u64 = 0;"; }
+    if row == 4 { return "  while count < flame {"; }
+    if row == 5 { return "    count = count + 1;"; }
+    if row == 6 { return "  }"; }
+    if row == 7 { return "  return count;"; }
+    if row == 8 { return "}"; }
+    return "";
+}
+
+fn draw_window() {
+    if !STUDIO_OPEN { return; }
+    let width:u64 = studio_width();
+    let height:u64 = studio_height();
+    let x:u64 = (FB_WIDTH - width) / 2;
+    let y:u64 = ui_sub((FB_HEIGHT - height) / 2,16);
+    fill_rect(x,y,width,height,SILVER);
+    bevel(x,y,width,height,true);
+    fill_rect(x + 4,y + 4,width - 8,26,NAVY);
+    draw_flame(x + 9,y + 7,2);
+    text(x + 31,y + 10,"TANEBI STUDIO - NATIVE",WHITE,1);
+    let button:u64 = 0;
+    while button < 3 {
+        let bx:u64 = x + width - 70 + button * 23;
+        fill_rect(bx,y + 7,19,19,SILVER);
+        bevel(bx,y + 7,19,19,true);
+        if button == 0 { text(bx + 6,y + 12,"_",BLACK,1); }
+        if button == 1 { text(bx + 6,y + 12,"#",BLACK,1); }
+        if button == 2 { text(bx + 6,y + 12,"X",BLACK,1); }
+        button = button + 1;
+    }
+    text(x + 12,y + 40,"FILE  EDIT  RUN  HELP",BLACK,1);
+    line_h(x + 5,y + 55,width - 10,WHITE);
+    line_h(x + 5,y + 56,width - 10,GRAY);
+    let pane_y:u64 = y + 66;
+    let pane_h:u64 = ui_sub(height,105);
+    let left_w:u64 = width * 56 / 100;
+    fill_rect(x + 10,pane_y,left_w - 15,pane_h,WHITE);
+    bevel(x + 9,pane_y - 1,left_w - 13,pane_h + 2,false);
+    fill_rect(x + left_w,pane_y,width - left_w - 10,pane_h,BLACK);
+    bevel(x + left_w - 1,pane_y - 1,width - left_w - 8,pane_h + 2,false);
+    let row:u64 = 0;
+    while row < 10 {
+        let color:u64 = BLACK;
+        if row == 0 { color = TEAL; }
+        text(x + 20,pane_y + 15 + row * 15,studio_code_line(row),color,1);
+        row = row + 1;
+    }
+    let output_x:u64 = x + left_w + 10;
+    text(output_x,pane_y + 15,"TANEBI NATIVE OUTPUT",WHITE,1);
+    text(output_x,pane_y + 45,"STUDIO_DEMO() =",WHITE,1);
+    text_number(output_x + 96,pane_y + 45,STUDIO_RESULT,YELLOW,1);
+    text(output_x,pane_y + 75,"EXECUTION: NATIVE",WHITE,1);
+    text(output_x,pane_y + 90,"OS SOURCE: TANEBI",WHITE,1);
+    text(output_x,pane_y + 105,"BACKEND: RUST",WHITE,1);
+    text(output_x,pane_y + 120,"TARGET: X86-64 UEFI",WHITE,1);
+    text(output_x,pane_y + 150,"UI / INPUT / MEDIA",WHITE,1);
+    text(output_x,pane_y + 165,"RUN AS NATIVE CODE",WHITE,1);
+    fill_rect(x + 8,y + height - 30,width - 16,20,SILVER);
+    bevel(x + 8,y + height - 30,width - 16,20,false);
+    text(x + 16,y + height - 24,"TANEBI NATIVE PROGRAM OK",BLACK,1);
+}
+
+fn draw_start_menu() {
+    let taskbar_y:u64 = ui_sub(FB_HEIGHT,42);
+    let width:u64 = ui_min(260,FB_WIDTH / 2);
+    let height:u64 = ui_min(250,ui_sub(taskbar_y,20));
+    let y:u64 = ui_sub(taskbar_y,height);
+    fill_rect(4,y,width,height,SILVER);
+    bevel(4,y,width,height,true);
+    fill_rect(8,y + 4,34,height - 8,NAVY);
+    text(18,y + height - 18,"95",WHITE,2);
+    fill_rect(48,y + 11,width - 56,26,NAVY);
+    text(58,y + 18,"TANEBI STUDIO",WHITE,1);
+    text(58,y + 58,"DOOM ARENA",BLACK,1);
+    text(58,y + 98,"MEDIA PLAYER",BLACK,1);
+    text(58,y + 138,"DOCUMENTS",BLACK,1);
+    text(58,y + 178,"SHUT DOWN",BLACK,1);
+}
+
+fn draw_power() {
+    let width:u64 = ui_min(500,ui_sub(FB_WIDTH,40));
+    let height:u64 = ui_min(180,ui_sub(FB_HEIGHT,60));
+    let x:u64 = (FB_WIDTH - width) / 2;
+    let y:u64 = (FB_HEIGHT - height) / 2;
+    fill_rect(x,y,width,height,SILVER);
+    bevel(x,y,width,height,true);
+    fill_rect(x + 4,y + 4,width - 8,25,NAVY);
+    text(x + 12,y + 11,"SHUT DOWN TANEBI 95",WHITE,1);
+    draw_flame(x + 28,y + 55,4);
+    text(x + 95,y + 60,"IT IS NOW SAFE TO TURN OFF",BLACK,1);
+    text(x + 95,y + 80,"YOUR TANEBI COMPUTER.",BLACK,1);
+    text(x + 95,y + 112,"PRESS ESC TO RETURN",NAVY,1);
+}
+
+fn render_inner() {
+    fill_rect(0,0,FB_WIDTH,FB_HEIGHT,TEAL);
+    draw_desktop_icon(28,28,"MY COMPUTER",false);
+    draw_desktop_icon(28,115,"TANEBI STUDIO",false);
+    draw_desktop_icon(28,202,"DOCUMENTS",true);
+    draw_doom_icon(38,289);
+    text(28,334,"DOOM ARENA",WHITE,1);
+    draw_desktop_icon(28,376,"RECYCLE BIN",false);
+    draw_desktop_icon(28,463,"MEDIA PLAYER",false);
+    draw_window();
+    player_draw();
+    let taskbar_y:u64 = ui_sub(FB_HEIGHT,42);
+    fill_rect(0,taskbar_y,FB_WIDTH,42,SILVER);
+    line_h(0,taskbar_y,FB_WIDTH,WHITE);
+    fill_rect(5,taskbar_y + 6,102,31,SILVER);
+    bevel(5,taskbar_y + 6,102,31,!START_OPEN);
+    draw_flame(11,taskbar_y + 10,2);
+    text(35,taskbar_y + 16,"START",BLACK,1);
+    if STUDIO_OPEN {
+        fill_rect(116,taskbar_y + 6,230,31,SILVER);
+        bevel(116,taskbar_y + 6,230,31,false);
+        text(128,taskbar_y + 16,"TANEBI STUDIO",BLACK,1);
+    }
+    if PLAYER_OPEN {
+        fill_rect(354,taskbar_y + 6,230,31,SILVER);
+        bevel(354,taskbar_y + 6,230,31,false);
+        text(366,taskbar_y + 16,"MEDIA PLAYER",BLACK,1);
+    }
+    let clock_x:u64 = ui_sub(FB_WIDTH,100);
+    fill_rect(clock_x,taskbar_y + 6,94,31,SILVER);
+    bevel(clock_x,taskbar_y + 6,94,31,false);
+    text(clock_x + 24,taskbar_y + 16,"09:04",BLACK,1);
+    text(ui_sub(FB_WIDTH,250),18,"TANEBI 95",WHITE,2);
+    text(ui_sub(FB_WIDTH,250),43,"A SPARK BECOMES A WORLD",WHITE,1);
+    if START_OPEN { draw_start_menu(); }
+    if POWER_OPEN { draw_power(); }
+}
+
+# 完成フレームを一括転送し、ウィンドウ操作時の描画途中を表示しない。
+fn render() {
+    let size:u64 = FB_WIDTH * FB_HEIGHT * 4;
+    if size > len(DESKTOP_BUFFER) { return; }
+    DRAW_BASE = addr(DESKTOP_BUFFER);
+    DRAW_SIZE = size;
+    DRAW_WIDTH = FB_WIDTH;
+    DRAW_HEIGHT = FB_HEIGHT;
+    DRAW_STRIDE = FB_WIDTH;
+    DRAW_RGB = FB_RGB;
+    render_inner();
+    let row:u64 = 0;
+    let bytes:u64 = FB_WIDTH * 4;
+    while row < FB_HEIGHT {
+        let destination:u64 = row * FB_STRIDE * 4;
+        if destination + bytes <= FB_SIZE {
+            copy(FB_BASE + destination,addr(DESKTOP_BUFFER) + row * bytes,bytes);
+        }
+        row = row + 1;
+    }
+    draw_to_screen();
+}
+
+fn handle_mouse_click(x:u64,y:u64) -> bool {
+    let taskbar_y:u64 = ui_sub(FB_HEIGHT,42);
+    if x >= 5 && x < 107 && y >= taskbar_y + 6 && y < taskbar_y + 37 {
+        START_OPEN = !START_OPEN;
+        POWER_OPEN = false;
+        return false;
+    }
+    if POWER_OPEN { POWER_OPEN = false; return false; }
+    if START_OPEN {
+        let menu_height:u64 = ui_min(250,ui_sub(taskbar_y,20));
+        let menu_y:u64 = ui_sub(taskbar_y,menu_height);
+        if x >= 44 && x <= 264 && y >= menu_y + 6 && y <= taskbar_y {
+            let row:u64 = ui_sub(y,menu_y + 5) / 40;
+            if row == 0 { STUDIO_OPEN = true; }
+            if row == 1 { return true; }
+            if row == 2 { player_show(); }
+            if row == 4 { POWER_OPEN = true; }
+            START_OPEN = false;
+            return false;
+        }
+        START_OPEN = false;
+    }
+    if player_click(x,y) { return false; }
+    if x <= 120 && y >= 455 && y <= 530 { player_show(); return false; }
+    if STUDIO_OPEN {
+        let width:u64 = studio_width();
+        let height:u64 = studio_height();
+        let wx:u64 = (FB_WIDTH - width) / 2;
+        let wy:u64 = ui_sub((FB_HEIGHT - height) / 2,16);
+        if x >= wx + width - 24 && x < wx + width - 5 && y >= wy + 7 && y < wy + 26 {
+            STUDIO_OPEN = false;
+        }
+        if x >= wx && x < wx + width && y >= wy && y < wy + height { return false; }
+    }
+    if x <= 120 && y >= 105 && y <= 198 { STUDIO_OPEN = true; }
+    if x <= 120 && y >= 279 && y <= 370 { return true; }
+    return false;
+}
+
+fn desktop_main() {
+    draw_to_screen();
+    STUDIO_RESULT = studio_demo();
+    player_init();
+    render();
+    serial("TANEBI95_TANEBI_DESKTOP_OK\n");
+    serial("TANEBI95_FRAMEBUFFER_OK\n");
+    if config("TEST") != 0 {
+        serial("TANEBI95_NATIVE_OK\n");
+        out32(0xf4,16);
+        while true { pause(); }
+    }
+    mouse_init();
+    sound_init();
+    MOUSE_X = FB_WIDTH / 2;
+    MOUSE_Y = FB_HEIGHT / 2;
+    toggle_cursor();
+    while true {
+        let status:u64 = in8(0x64);
+        if (status & 1) == 0 {
+            # 保留中のPS/2パケットを先に読み切り、動画更新でマウスを遅延させない。
+            if player_update() { sound_service(); player_draw_live(); }
+            pause();
+            continue;
+        }
+        let data:u64 = in8(0x60);
+        if (status & 0x20) != 0 {
+            let old_x:u64 = MOUSE_X;
+            let old_y:u64 = MOUSE_Y;
+            if mouse_feed(data) {
+                if MOUSE_MOVED {
+                    toggle_cursor_at(old_x,old_y);
+                    toggle_cursor();
+                }
+                if MOUSE_CLICKED {
+                    toggle_cursor();
+                    if handle_mouse_click(MOUSE_X,MOUSE_Y) { reboot_doom(); }
+                    sound_service();
+                    render();
+                    toggle_cursor();
+                }
+            }
+            continue;
+        }
+        if (data & 0x80) != 0 { continue; }
+        if data == 0x1f {
+            START_OPEN = !START_OPEN;
+            POWER_OPEN = false;
+        } else if data == 0x14 {
+            STUDIO_OPEN = !STUDIO_OPEN;
+            START_OPEN = false;
+            POWER_OPEN = false;
+        } else if data == 0x20 {
+            reboot_doom();
+        } else if data == 0x2f {
+            player_show();
+            START_OPEN = false;
+        } else if data == 0x39 && PLAYER_OPEN {
+            player_toggle();
+        } else if data == 1 {
+            POWER_OPEN = !POWER_OPEN;
+            START_OPEN = false;
+        } else {
+            continue;
+        }
+        toggle_cursor();
+        sound_service();
+        render();
+        toggle_cursor();
+    }
+}
