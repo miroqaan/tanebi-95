@@ -6,7 +6,8 @@ param(
     [string]$AudioLog = '',
     [ValidateRange(0, 65535)]
     [int]$MonitorPort = 0,
-    [string]$SerialLog = ''
+    [string]$SerialLog = '',
+    [switch]$Muted
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,7 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $image = Join-Path $repositoryRoot 'build\tanebi95.img'
 
 if (-not $SkipBuild) {
-    & (Join-Path $PSScriptRoot 'build.ps1') -Profile release
+    & (Join-Path $PSScriptRoot 'build.ps1') -Profile release -QemuTest:$HeadlessTest
 }
 
 $qemuCandidates = @(
@@ -47,7 +48,7 @@ $arguments = @(
 
 if ($HeadlessTest) { $arguments += '-no-reboot' }
 if ($AudioLog) { $arguments += @('-audiodev',"wav,id=media,path=$AudioLog") }
-elseif ($HeadlessTest) { $arguments += @('-audiodev','none,id=media') }
+elseif ($HeadlessTest -or $Background -or $Muted) { $arguments += @('-audiodev','none,id=media') }
 else { $arguments += @('-audiodev','dsound,id=media') }
 $arguments += @('-device','sb16,audiodev=media')
 
@@ -68,11 +69,26 @@ if ($HeadlessTest) { $arguments += @('-display', 'none') }
 else { $arguments += @('-display', 'gtk,zoom-to-fit=on') }
 
 if ($HeadlessTest) {
-    $qemuOutput = & $qemu @arguments 2>&1
-    $exitCode = $LASTEXITCODE
+    $testStart = [Diagnostics.ProcessStartInfo]::new($qemu)
+    $testStart.UseShellExecute = $false
+    $testStart.CreateNoWindow = $true
+    $testStart.RedirectStandardOutput = $true
+    $testStart.RedirectStandardError = $true
+    foreach ($argument in $arguments) { $testStart.ArgumentList.Add($argument) }
+    $testProcess = [Diagnostics.Process]::Start($testStart)
+    $stdout = $testProcess.StandardOutput.ReadToEndAsync()
+    $stderr = $testProcess.StandardError.ReadToEndAsync()
+    if (-not $testProcess.WaitForExit(60000)) {
+        $testProcess.Kill()
+        $testProcess.WaitForExit()
+        throw "QEMU boot test timed out. $($stdout.GetAwaiter().GetResult()) $($stderr.GetAwaiter().GetResult())"
+    }
+    $qemuOutput = @($stdout.GetAwaiter().GetResult(), $stderr.GetAwaiter().GetResult())
+    $exitCode = $testProcess.ExitCode
+    $testProcess.Dispose()
     $qemuOutput | ForEach-Object { Write-Host $_ }
     if ($exitCode -ne 33) { throw "QEMU exited with code $exitCode; expected 33." }
-    if (($qemuOutput -join "`n") -notmatch 'TANEBI95_BARE_METAL_OK') {
+    if (($qemuOutput -join "`n") -notmatch 'TANEBI95_BARE_METAL_OK' -or ($qemuOutput -join "`n") -notmatch 'TANEBI95_SOURCE_LANGUAGE_TANEBI' -or ($qemuOutput -join "`n") -notmatch 'TANEBI95_TANEBI_DESKTOP_OK') {
         throw 'QEMU did not reach the bare-metal handoff marker.'
     }
     Write-Host '[ok] QEMU booted TANEBI 95 and observed the native test exit.'
