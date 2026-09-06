@@ -1,7 +1,8 @@
-param([switch]$Media,[ValidateSet(10,30)][int]$Fps=30)
+param([switch]$Media,[switch]$DoomLaunch,[ValidateSet(10,30)][int]$Fps=30)
 $ErrorActionPreference='Stop'
+if($Media -and $DoomLaunch){throw 'Select Media or DoomLaunch, not both.'}
 $root=Split-Path -Parent $PSScriptRoot
-$out=Join-Path $root $(if($Media){'build\player-capture'}else{'build\clean-capture'})
+$out=Join-Path $root $(if($DoomLaunch){'build\doom-launch-capture'}elseif($Media){'build\player-capture'}else{'build\clean-capture'})
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item (Join-Path $root 'build\tanebi95.img') (Join-Path $out 'capture.img') -Force
 $qemu='C:\Program Files\qemu\qemu-system-x86_64.exe'
@@ -48,7 +49,7 @@ try {
         Move-Setup 640 400
     }
     $psi=[Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg).Source)
-    $psi.Arguments='-y -loglevel error -f image2pipe -vcodec ppm -framerate '+$Fps+' -i - -an -c:v libx264 -preset fast -crf 12 -pix_fmt yuv420p "'+$out+'\desktop.mp4"'
+    $psi.Arguments='-y -loglevel error -f image2pipe -vcodec ppm -framerate '+$Fps+' -i - -an -vf "scale=1280:800:force_original_aspect_ratio=decrease:flags=neighbor,pad=1280:800:(ow-iw)/2:(oh-ih)/2,setsar=1" -c:v libx264 -preset fast -crf 12 -pix_fmt yuv420p "'+$out+'\desktop.mp4"'
     $psi.UseShellExecute=$false; $psi.CreateNoWindow=$true; $psi.RedirectStandardInput=$true
     $encoder=[Diagnostics.Process]::Start($psi)
     $points=@(
@@ -76,6 +77,13 @@ try {
         )
         $clicks=@(17,37,122,147,172,262,312,337);$count=360
     }
+    if($DoomLaunch){
+        $points=@(
+            @{F=0;X=640;Y=400},@{F=20;X=60;Y=312},
+            @{F=179;X=60;Y=312}
+        )
+        $clicks=@(22);$count=180
+    }
     # Original cue positions are in tenths of a second; retain their timing.
     $factor=$Fps/10
     foreach($point in $points){$point.F=[int]($point.F*$factor)}
@@ -101,6 +109,12 @@ try {
     }
     $encoder.StandardInput.Close(); $encoder.WaitForExit()
     if($encoder.ExitCode -ne 0){throw 'Capture encoding failed'}
+    if($DoomLaunch){
+        $bootLog=Get-Content "$out\serial.log" -Raw
+        if($bootLog -notmatch 'TANEBI95_DOOM_REQUESTED' -or $bootLog -notmatch 'TANEBI95_BOOT_DOOM'){
+            throw 'DOOM launch was not confirmed by the boot log.'
+        }
+    }
     Send 'mouse_button 0'
     $writer.WriteLine('quit')
     Write-Host "$out\desktop.mp4"

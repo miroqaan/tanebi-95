@@ -106,6 +106,12 @@ DOOM はカーネル内のプロセスではありません。デスクトップ
 
 通常版イメージの実操作を、ホストスピーカー出力なし・画面非表示で検査するには、`scripts/test-interaction.ps1` を実行します。実際のフレームバッファーPNG、シリアルログ、音声WAVを `build/native-qa-*` に保存します。実装元は `system/*.tanebi`、自動検証の詳細は `scripts/test-native.ps1` と `tests/` を参照してください。
 
+## 保存している動画制作ツール
+
+`scripts/render-native-fullframe.ps1` は、旧Rust版の紹介動画を再現する保存用ツールです。旧構成の説明、1280×800素材の拡大、ナレーション専用の音声構成を保持しており、現行OSの紹介動画制作には使用しません。新規動画では実際の2560×1440以上の描画・収録と、ゲームのBGM・効果音を含む出力検証が別途必要です。
+
+`scripts/capture-desktop-clean.ps1` は操作の記録、`scripts/verify-intro-audio.py` はFFmpeg/ffprobeとNumPyによる書き出し音声の技術検査用です。技術検査は人による試聴を代替しません。今回のコード更新だけで既存動画が再生成・再投稿されることはありません。
+
 ## プロジェクト構成
 
 ```text

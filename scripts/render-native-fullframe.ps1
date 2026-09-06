@@ -1,10 +1,22 @@
+# 旧Rust版の紹介動画を再現するための保存用スクリプト。
+# 1280x800素材の拡大・ナレーション専用構成であり、現行OSの紹介や
+# 新規動画の実1440p収録・ゲーム音声要件を満たす制作経路ではありません。
 param([switch]$CleanInput,[switch]$Media)
+Write-Warning '旧紹介動画の再現用です。現行TANEBI実装・実1440p収録・ゲーム音声付きの新規動画には使用しないでください。'
 if($Media){$CleanInput=$true}
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $root $(if($Media){'build\native-player-intro'}elseif($CleanInput){'build\native-clean'}else{'build\native-fullframe'})
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item C:\Windows\Fonts\YuGothR.ttc (Join-Path $out 'font.ttc') -Force
+if($Media){
+    # Remove idle playback holds, retaining the real opening, playback controls,
+    # seek, stop, and close actions in their original order.
+    $mediaSource=Join-Path $root 'build\player-capture\desktop.mp4'
+    $mediaEdit=Join-Path $root 'build\player-capture\intro-edit.mp4'
+    & ffmpeg -y -hide_banner -loglevel error -i $mediaSource -filter_complex '[0:v]split=3[v0][v1][v2];[v0]trim=start=0:end=6,setpts=PTS-STARTPTS[a];[v1]trim=start=10:end=18,setpts=PTS-STARTPTS[b];[v2]trim=start=25:end=35,setpts=PTS-STARTPTS[c];[a][b][c]concat=n=3:v=1:a=0[out]' -map '[out]' -an -c:v libx264 -preset fast -crf 12 -pix_fmt yuv420p $mediaEdit
+    if($LASTEXITCODE -ne 0){throw 'Player edit failed'}
+}
 # Match the web introduction's full-bleed footage and brief orange chapter cards.
 # Preserve the native 16:10 framebuffer without cropping the taskbar or stretching.
 $scenes = @(
@@ -23,20 +35,26 @@ if($CleanInput) {
     )
 }
 if($Media){
-    $mediaScene=@{File='player-capture\desktop.mp4';Start=0;Duration=36;Crop='';Title='03  ネイティブ・メディアプレイヤー';Text='メディアプレイヤーを開き、再生をクリックします。指定された動画の16分14秒から、30秒の区間をOSに内蔵しました。これはウェブページではなく、ネイティブの動画再生です。音声出力にも対応しています。一時停止して5秒先へ移動し、再生を再開。シークバーで好きな位置へ移り、停止すると先頭へ戻ります。最後にウィンドウを閉じます。現在はオフライン再生で、YouTubeへの直接接続ではありません。';Clicks=@(@{T=1.7;X=60;Y=480},@{T=3.7;X=190;Y=681},@{T=6.2;X=600;Y=681},@{T=12.2;X=190;Y=681},@{T=14.7;X=495;Y=681},@{T=17.2;X=190;Y=681},@{T=26.2;X=900;Y=681},@{T=31.2;X=290;Y=681},@{T=33.7;X=1123;Y=68})}
-    $mediaScene.Clicks=@($mediaScene.Clicks | Where-Object {$_.T -ne 6.2})
-    $audioScene=@{File='player-capture\desktop.mp4';Start=3.8;Duration=4;Crop='';Title='04  ネイティブ音声 — 実出力';AudioFile='player-capture\audio.wav'}
-    $scenes[2].Title='05  DOOM — 実際の戦闘'
-    $scenes=@($scenes[0],$scenes[1],$mediaScene,$audioScene,$scenes[2])
+    $mediaScene=@{File='player-capture\intro-edit.mp4';Start=0;Duration=24;Crop='';Title='03  メディアプレイヤー';Text='続いて、メディアプレイヤーです。内蔵のダンジョンクロール映像を再生してみましょう。一時停止や再開に加え、ボタンやシークバーで再生位置を調整できます。見たい場面を確認したら、プレイヤーを閉じてゲームへ進みましょう。';Clicks=@(@{T=1.7;X=60;Y=480},@{T=3.7;X=190;Y=681},@{T=8.2;X=190;Y=681},@{T=10.7;X=495;Y=681},@{T=13.2;X=190;Y=681},@{T=15.2;X=900;Y=681},@{T=20.2;X=290;Y=681},@{T=22.7;X=1123;Y=68})}
+    # Keep the introduction narration-only: the separate source-audio insert
+    # sounded like an unrelated mechanical effect before the DOOM chapter.
+    $launchScene=@{File='doom-launch-capture\desktop.mp4';Start=0;Duration=15;Crop='';Title='04  DOOMを起動';Text='デスクトップのドゥーム・アリーナのアイコンをクリックすると、再起動してゲームが立ち上がります。読み込みが終わったら、さっそく進んでみましょう。';Clicks=@(@{T=2.2;X=60;Y=312})}
+    $scenes[2].Title='05  DOOMをプレイ'
+    $scenes[2].Start=14
+    $scenes[2].Duration=20
+    $scenes[2].Text='敵の動きを見ながら狙いを定め、撃ち返します。移動と射撃はキーボードで操作。体力や弾薬は、画面下で確認できます。デスクトップから動画、そしてゲームへ。これがタネビ95です。'
+    $scenes=@($scenes[0],$scenes[1],$mediaScene,$launchScene,$scenes[2])
 }
 if($CleanInput){
     # Keep narration within the recorded action, so pointer motion stays real-time.
-    $scenes[0].Text='タネビ95。実際のOS画面を操作します。ウィンドウを閉じ、スタートメニューからスタジオを開きます。'
+    $scenes[0].Text='タネビ95へようこそ。懐かしいデスクトップから、スタートメニューを開き、スタジオを起動してみましょう。'
     $scenes[1].Title='02  TANEBIとOSの構成'
-    $scenes[1].Text='タネビで起動プログラムを書き、ビルド時に実行した結果をRustのカーネルへ組み込みます。QEMUとUEFIで起動し、Rustが画面、入力、プレイヤーを担当します。'
+    $scenes[1].Text='タネビのプログラムはビルド時に実行し、結果をOSへ組み込みます。画面や入力、動画再生はRustで実装し、QEMU上で動かしています。'
 }
-if($Media){
-    $scenes[2].Text='プレイヤーを開いて再生。指定された動画の16分14秒から、30秒の区間を内蔵しています。音声もネイティブ出力です。一時停止し、5秒先へ移動。再開後はシークバーで位置を変え、停止すると先頭へ戻ります。最後にウィンドウを閉じます。これはオフライン再生で、YouTubeへの直接接続ではありません。'
+foreach ($scene in $scenes) {
+    if ($scene.Text) {
+        $scene.Text=$scene.Text.Replace('ゲーム音声はミュートして収録しています。','').Replace('収録時のゲーム音声はミュートしています。','')
+    }
 }
 for ($i=0; $i -lt $scenes.Count; $i++) {
     $scene=$scenes[$i]; $n=$i+1
@@ -68,7 +86,9 @@ for ($i=0; $i -lt $scenes.Count; $i++) {
     $vf=$scene.Crop+$marks+"scale=2560:1600:flags=neighbor,setsar=1,drawbox=x=1440:y=1260:w=1060:h=140:color=0x081226@0.88:t=fill:enable='lt(t,2.4)',drawbox=x=1440:y=1260:w=10:h=140:color=0xffaa30:t=fill:enable='lt(t,2.4)',drawtext=fontfile=font.ttc:textfile='$n.txt':fontcolor=white:fontsize=46:x=1480:y=1303:enable='lt(t,2.4)',tpad=stop_mode=clone:stop_duration=30"
     Push-Location $out
     try {
-        & ffmpeg -y -hide_banner -loglevel error -ss $scene.Start -t $scene.Duration -i $inputFile -i $audio -vf $vf -af apad -t $duration -r 30 -c:v libx264 -preset fast -crf 14 -pix_fmt yuv420p -c:a aac -b:a 192k -ar 48000 "$n.mp4"
+        # Stream-copy concatenation requires identical AAC channel configuration.
+        # TTS is mono but QEMU capture is stereo; normalize every scene explicitly.
+        & ffmpeg -y -hide_banner -loglevel error -ss $scene.Start -t $scene.Duration -i $inputFile -i $audio -map 0:v:0 -map 1:a:0 -vf $vf -af apad -t $duration -r 30 -c:v libx264 -preset fast -crf 14 -pix_fmt yuv420p -c:a aac -b:a 192k -ar 48000 -ac 2 "$n.mp4"
         if ($LASTEXITCODE -ne 0) { throw "Scene $n failed" }
     } finally { Pop-Location }
     Write-Host "Rendered scene $n/$($scenes.Count)"
@@ -76,6 +96,19 @@ for ($i=0; $i -lt $scenes.Count; $i++) {
 $concat=Join-Path $out 'concat.txt'
 [IO.File]::WriteAllLines($concat,(1..$scenes.Count | ForEach-Object {"file '$_.mp4'"}))
 $output=Join-Path $root $(if($Media){'build\TANEBI-95-native-ja-player-1600p.mp4'}elseif($CleanInput){'build\TANEBI-95-native-ja-clean-clicks-1600p.mp4'}else{'build\TANEBI-95-native-ja-fullframe-1600p.mp4'})
-& ffmpeg -y -hide_banner -loglevel error -f concat -safe 0 -i $concat -c copy -movflags +faststart $output
+# Decode scene audio independently: concatenating AAC packets also carries
+# encoder priming/padding into chapter transitions and accumulates timing gaps.
+# Keep video lossless while encoding a single continuous audio stream.
+$assembly=@('-y','-hide_banner','-loglevel','error','-f','concat','-safe','0','-i',$concat)
+$audioFilters=@()
+for($n=1;$n -le $scenes.Count;$n++) {
+    $part=Join-Path $out "$n.mp4"
+    $partDuration=& ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 $part
+    $assembly+=@('-i',$part)
+    $audioFilters+="[$n`:a:0]aresample=48000,aformat=channel_layouts=stereo,apad=whole_dur=$partDuration,atrim=duration=$partDuration,asetpts=N/SR/TB[a$n]"
+}
+$audioFilters+=((1..$scenes.Count | ForEach-Object {"[a$_]"}) -join '')+"concat=n=$($scenes.Count):v=0:a=1,alimiter=limit=0.89125:level=false[audio]"
+$assembly+=@('-filter_complex',($audioFilters -join ';'),'-map','0:v:0','-map','[audio]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-movflags','+faststart',$output)
+& ffmpeg @assembly
 if ($LASTEXITCODE -ne 0) { throw 'Assembly failed' }
 Write-Host $output
